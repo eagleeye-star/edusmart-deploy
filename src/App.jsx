@@ -11,7 +11,7 @@ const LICENCE_TIERS = {
 
 // ─── DEFAULT DATA ─────────────────────────────────────────────
 const DEFAULT_SCHOOL = {
-  name: "Eikwe Basic School",
+  name: "My School",
   address: "Eikwe, Western Region, Ghana",
   phone: "+233 000 000 000",
   email: "info@eikwebasic.edu.gh",
@@ -49,32 +49,13 @@ const SEED_USERS = [
   { id:"USR-008", code:"NTS001", name:"Mr. Joseph Kuma", role:"nonteaching", username:"security", pin:"8901", dept:"Administration", subject:"", assignedClass:"", email:"nt1@school.gh", phone:"0500000008", active:true },
 ];
 
-const SEED_STUDENTS = [
-  { id:"STU-001", studentId:"ESB-2024-001", name:"Akosua Mensah", dob:"2012-03-15", gender:"Female", class:"Primary 6", parentName:"Mrs. Mensah", parentPhone:"0244000001", address:"Eikwe", admissionDate:"2018-01-10", status:"active", photo:null },
-  { id:"STU-002", studentId:"ESB-2024-002", name:"Kwame Asante", dob:"2012-07-22", gender:"Male", class:"Primary 6", parentName:"Mr. Asante", parentPhone:"0244000002", address:"Eikwe", admissionDate:"2018-01-10", status:"active", photo:null },
-  { id:"STU-003", studentId:"ESB-2024-003", name:"Abena Oforiwaa", dob:"2013-01-05", gender:"Female", class:"Primary 5", parentName:"Mr. Oforiwaa", parentPhone:"0244000003", address:"Eikwe", admissionDate:"2019-09-02", status:"active", photo:null },
-  { id:"STU-004", studentId:"ESB-2024-004", name:"Kofi Boateng", dob:"2011-11-30", gender:"Male", class:"JHS 1", parentName:"Mrs. Boateng", parentPhone:"0244000004", address:"Eikwe", admissionDate:"2017-09-04", status:"active", photo:null },
-  { id:"STU-005", studentId:"ESB-2024-005", name:"Ama Darko", dob:"2014-05-18", gender:"Female", class:"Primary 3", parentName:"Mr. Darko", parentPhone:"0244000005", address:"Eikwe", admissionDate:"2020-01-08", status:"active", photo:null },
-];
+const SEED_STUDENTS = [];
 
-const SEED_FEES = [
-  { id:"FEE-001", studentId:"STU-001", studentName:"Akosua Mensah", class:"Primary 6", type:"School Fees", amount:350, paid:350, balance:0, term:"Term 1 2024", date:"2024-01-15", receiptNo:"RCP-001", enteredBy:"ACC001", status:"paid" },
-  { id:"FEE-002", studentId:"STU-002", studentName:"Kwame Asante", class:"Primary 6", type:"School Fees", amount:350, paid:200, balance:150, term:"Term 1 2024", date:"2024-01-20", receiptNo:"RCP-002", enteredBy:"ACC001", status:"partial" },
-  { id:"FEE-003", studentId:"STU-003", studentName:"Abena Oforiwaa", class:"Primary 5", type:"School Fees", amount:300, paid:0, balance:300, term:"Term 1 2024", date:"", receiptNo:"", enteredBy:"", status:"unpaid" },
-  { id:"FEE-004", studentId:"STU-001", studentName:"Akosua Mensah", class:"Primary 6", type:"PTA Levy", amount:50, paid:50, balance:0, term:"Term 1 2024", date:"2024-01-15", receiptNo:"RCP-003", enteredBy:"ACC001", status:"paid" },
-];
+const SEED_FEES = [];
 
-const SEED_GRADES = [
-  { id:"GRD-001", studentId:"STU-001", studentName:"Akosua Mensah", class:"Primary 6", subject:"English Language", term:"Term 1 2024", classScore:35, examScore:52, total:87, grade:"A1", remark:"Excellent", enteredBy:"TCH001", date:"2024-03-20" },
-  { id:"GRD-002", studentId:"STU-002", studentName:"Kwame Asante", class:"Primary 6", subject:"Mathematics", term:"Term 1 2024", classScore:28, examScore:45, total:73, grade:"B2", remark:"Good", enteredBy:"TCH001", date:"2024-03-20" },
-  { id:"GRD-003", studentId:"STU-001", studentName:"Akosua Mensah", class:"Primary 6", subject:"Mathematics", term:"Term 1 2024", classScore:32, examScore:50, total:82, grade:"B3", remark:"Very Good", enteredBy:"TCH001", date:"2024-03-20" },
-];
+const SEED_GRADES = [];
 
-const SEED_ATTENDANCE = [
-  { id:"ATT-001", studentId:"STU-001", studentName:"Akosua Mensah", class:"Primary 6", date:"2024-01-15", status:"present", enteredBy:"TCH001" },
-  { id:"ATT-002", studentId:"STU-002", studentName:"Kwame Asante", class:"Primary 6", date:"2024-01-15", status:"absent", enteredBy:"TCH001" },
-  { id:"ATT-003", studentId:"STU-001", studentName:"Akosua Mensah", class:"Primary 6", date:"2024-01-16", status:"present", enteredBy:"TCH001" },
-];
+const SEED_ATTENDANCE = [];
 
 const SEED_TIMETABLE = {
   "Primary 6": {
@@ -93,11 +74,7 @@ const SEED_TIMETABLE = {
   },
 };
 
-const SEED_BOOKS = [
-  { id:"BK-001", title:"New Standard Mathematics 6", author:"G. Asiedu", isbn:"978-000-001", category:"Textbook", class:"Primary 6", copies:10, available:7, addedBy:"LIB001", date:"2023-09-01" },
-  { id:"BK-002", title:"English for Primary Schools", author:"K. Asamoah", isbn:"978-000-002", category:"Textbook", class:"Primary 6", copies:10, available:9, addedBy:"LIB001", date:"2023-09-01" },
-  { id:"BK-003", title:"Our World Our People", author:"GES", isbn:"978-000-003", category:"Textbook", class:"Primary 5", copies:8, available:8, addedBy:"LIB001", date:"2023-09-01" },
-];
+const SEED_BOOKS = [];
 
 const SEED_BOOK_LOANS = [
   { id:"BL-001", bookId:"BK-001", bookTitle:"New Standard Mathematics 6", borrower:"Akosua Mensah", borrowerType:"student", borrowerId:"STU-001", loanDate:"2024-01-20", dueDate:"2024-02-20", returnDate:"", status:"active", issuedBy:"LIB001" },
@@ -1358,6 +1335,147 @@ function Settings({ school, setSchool, licence }) {
 
 // ─── MAIN APP ─────────────────────────────────────────────────
 // ─── BACKUP & RESTORE ────────────────────────────────────────────────────────
+
+// ── INSTITUTION HELPERS (Update 5) ───────────────────────────────────────────
+function loadInstitution(key) {
+  try { return JSON.parse(localStorage.getItem(key + "_inst")) || { name: "", address: "" }; } catch { return { name: "", address: "" }; }
+}
+function saveInstitution(key, inst) {
+  try { localStorage.setItem(key + "_inst", JSON.stringify(inst)); } catch {}
+}
+
+
+// ── LICENCE EXPIRY BANNER (Update 8) ─────────────────────────────────────────
+function ExpiryBanner({ expiry, phone }) {
+  if (!expiry || expiry === "—") return null;
+  const days = Math.ceil((new Date(expiry) - new Date()) / 86400000);
+  if (days > 30) return null;
+  const bg  = days <= 7 ? "#dc2626" : "#d97706";
+  const msg = days <= 0
+    ? `Licence has expired — contact ${phone||"0597147460"} to renew`
+    : days <= 7
+      ? `⚠ Licence expires in ${days} day${days!==1?"s":""} — renew immediately`
+      : `Licence expires in ${days} day${days!==1?"s":""} — contact ${phone||"0597147460"} to renew`;
+  return (
+    <div style={{ background: bg, color: "#fff", textAlign: "center", padding: "7px 16px", fontSize: 12, fontWeight: 700, letterSpacing: 0.3 }}>
+      {msg}
+    </div>
+  );
+}
+
+
+// ── RESET MODAL (Update 1) ───────────────────────────────────────────────────
+function ResetModal({ onConfirm, onCancel, adminPin, accent, cardBg }) {
+  const [pin,  setPin]  = useState("");
+  const [err,  setErr]  = useState("");
+  const [step, setStep] = useState(1);
+  const check = () => { if (pin !== String(adminPin)) { setErr("Incorrect PIN."); return; } setStep(2); };
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:20 }}>
+      <div style={{ background: cardBg||"#1f2330", border:"1px solid #ef444455", borderRadius:14, padding:28, width:"min(94vw,400px)" }}>
+        {step === 1 ? (<>
+          <div style={{ fontSize:18, fontWeight:800, color:"#ef4444", marginBottom:8 }}>🔐 Admin PIN Required</div>
+          <p style={{ fontSize:13, color:"#94a3b8", marginBottom:16 }}>Enter your admin PIN to access the reset function.</p>
+          <input type="password" inputMode="numeric" maxLength={6} value={pin}
+            onChange={e=>{setPin(e.target.value.replace(/\D/g,""));setErr("");}}
+            onKeyDown={e=>e.key==="Enter"&&check()} placeholder="••••" autoFocus
+            style={{ width:"100%", padding:12, background:"rgba(255,255,255,0.06)", border:`1.5px solid ${err?"#ef4444":"rgba(255,255,255,0.15)"}`, borderRadius:8, color:"#fff", fontSize:20, textAlign:"center", letterSpacing:6, outline:"none", boxSizing:"border-box", marginBottom:8, fontFamily:"inherit" }} />
+          {err && <div style={{ color:"#fca5a5", fontSize:12, marginBottom:8 }}>{err}</div>}
+          <div style={{ display:"flex", gap:10, marginTop:8 }}>
+            <button onClick={onCancel} style={{ flex:1, padding:"10px 0", background:"transparent", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, color:"#94a3b8", fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>Cancel</button>
+            <button onClick={check}    style={{ flex:1, padding:"10px 0", background:accent||"#2E86AB", color:"#fff", border:"none", borderRadius:8, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Verify PIN</button>
+          </div>
+        </>) : (<>
+          <div style={{ fontSize:18, fontWeight:800, color:"#ef4444", marginBottom:8 }}>⚠️ Confirm Full Reset</div>
+          <p style={{ fontSize:13, color:"#94a3b8", marginBottom:6, lineHeight:1.7 }}>This will <strong style={{ color:"#ef4444" }}>permanently delete ALL data</strong> in this app — records, settings, everything.</p>
+          <p style={{ fontSize:13, color:"#ef4444", fontWeight:700, marginBottom:20 }}>This cannot be undone.</p>
+          <div style={{ display:"flex", gap:10 }}>
+            <button onClick={onCancel}  style={{ flex:1, padding:"10px 0", background:"transparent", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, color:"#94a3b8", fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>Cancel</button>
+            <button onClick={onConfirm} style={{ flex:1, padding:"10px 0", background:"#dc2626", color:"#fff", border:"none", borderRadius:8, fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>Delete All Data</button>
+          </div>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
+
+// ── FIRST-TIME SETUP WIZARD (Update 4) ───────────────────────────────────────
+function SetupWizard({ onComplete, instLabel, accentColor, bgGrad }) {
+  const [step,     setStep]     = useState(1);
+  const [instName, setInstName] = useState("");
+  const [instAddr, setInstAddr] = useState("");
+  const [username, setUsername] = useState("");
+  const [pin,      setPin]      = useState("");
+  const [pin2,     setPin2]     = useState("");
+  const [err,      setErr]      = useState("");
+
+  const nextStep = () => {
+    if (!instName.trim()) { setErr((instLabel||"Institution") + " name is required."); return; }
+    setErr(""); setStep(2);
+  };
+  const finish = () => {
+    if (!username.trim())  { setErr("Admin username is required."); return; }
+    if (pin.length < 4)    { setErr("PIN must be at least 4 digits."); return; }
+    if (pin !== pin2)      { setErr("PINs do not match."); return; }
+    onComplete({ instName: instName.trim(), instAddr: instAddr.trim(), username: username.trim(), pin });
+  };
+
+  const inp = { width:"100%", padding:"11px 13px", background:"rgba(255,255,255,0.08)", border:"1.5px solid rgba(255,255,255,0.2)", borderRadius:8, color:"#fff", fontSize:14, outline:"none", boxSizing:"border-box", fontFamily:"inherit" };
+
+  return (
+    <div style={{ minHeight:"100vh", background: bgGrad||"#0a1628", display:"flex", alignItems:"center", justifyContent:"center", padding:20, fontFamily:"'Inter','Segoe UI',sans-serif" }}>
+      <div style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:18, padding:"36px 32px", width:"min(94vw,460px)", boxShadow:"0 24px 80px rgba(0,0,0,0.5)" }}>
+        <div style={{ textAlign:"center", marginBottom:24 }}>
+          <div style={{ fontSize:40, marginBottom:10 }}>⚙️</div>
+          <div style={{ fontSize:22, fontWeight:900, color: accentColor||"#c9a84c", marginBottom:4 }}>First-Time Setup</div>
+          <div style={{ color:"rgba(255,255,255,0.55)", fontSize:13 }}>Step {step} of 2 — {step===1?"Institution Details":"Admin Account"}</div>
+        </div>
+        <div style={{ display:"flex", gap:6, marginBottom:24 }}>
+          {[1,2].map(s=>(
+            <div key={s} style={{ flex:1, height:4, borderRadius:2, background: s<=step ? (accentColor||"#c9a84c") : "rgba(255,255,255,0.15)" }} />
+          ))}
+        </div>
+        {step === 1 && (
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            <div>
+              <label style={{ fontSize:11, color:"rgba(255,255,255,0.6)", display:"block", marginBottom:5 }}>{instLabel||"Institution"} Name *</label>
+              <input value={instName} onChange={e=>{setInstName(e.target.value);setErr("");}} placeholder={`e.g. My ${instLabel||"Business"}`} style={inp} />
+            </div>
+            <div>
+              <label style={{ fontSize:11, color:"rgba(255,255,255,0.6)", display:"block", marginBottom:5 }}>Address</label>
+              <input value={instAddr} onChange={e=>setInstAddr(e.target.value)} placeholder="e.g. Kumasi, Ashanti Region" style={inp} />
+            </div>
+            {err && <div style={{ color:"#fca5a5", fontSize:12 }}>{err}</div>}
+            <button onClick={nextStep} style={{ width:"100%", padding:"13px 0", background: accentColor||"#c9a84c", color:"#000", border:"none", borderRadius:10, fontWeight:800, fontSize:15, cursor:"pointer", fontFamily:"inherit", marginTop:4 }}>Next →</button>
+          </div>
+        )}
+        {step === 2 && (
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            <div>
+              <label style={{ fontSize:11, color:"rgba(255,255,255,0.6)", display:"block", marginBottom:5 }}>Admin Username *</label>
+              <input value={username} onChange={e=>{setUsername(e.target.value);setErr("");}} placeholder="e.g. admin" style={inp} />
+            </div>
+            <div>
+              <label style={{ fontSize:11, color:"rgba(255,255,255,0.6)", display:"block", marginBottom:5 }}>Admin PIN * (4–6 digits)</label>
+              <input type="password" inputMode="numeric" maxLength={6} value={pin} onChange={e=>{setPin(e.target.value.replace(/\D/g,""));setErr("");}} placeholder="••••" style={{...inp, letterSpacing:4, textAlign:"center"}} />
+            </div>
+            <div>
+              <label style={{ fontSize:11, color:"rgba(255,255,255,0.6)", display:"block", marginBottom:5 }}>Confirm PIN *</label>
+              <input type="password" inputMode="numeric" maxLength={6} value={pin2} onChange={e=>{setPin2(e.target.value.replace(/\D/g,""));setErr("");}} placeholder="••••" style={{...inp, letterSpacing:4, textAlign:"center"}} />
+            </div>
+            {err && <div style={{ color:"#fca5a5", fontSize:12 }}>{err}</div>}
+            <div style={{ display:"flex", gap:10, marginTop:4 }}>
+              <button onClick={()=>{setStep(1);setErr("");}} style={{ flex:1, padding:"12px 0", background:"transparent", border:"1px solid rgba(255,255,255,0.2)", borderRadius:8, color:"rgba(255,255,255,0.7)", fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>← Back</button>
+              <button onClick={finish} style={{ flex:2, padding:"12px 0", background: accentColor||"#c9a84c", color:"#000", border:"none", borderRadius:8, fontWeight:800, fontSize:14, cursor:"pointer", fontFamily:"inherit" }}>Complete Setup ✓</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function EduBackup({ data, onRestore }) {
   const [confirmRestore, setConfirmRestore] = useState(null);
   const [msg, setMsg] = useState(null);
@@ -1462,6 +1580,9 @@ function EduBackup({ data, onRestore }) {
 
 export default function App() {
   const [licence, setLicence] = useState(() => getLS("edu_licence", null));
+  const [setupDone, setSetupDone] = useState(()=>!!localStorage.getItem("edu_setup"));
+  const [institution, setInstitution] = useState(()=>loadInstitution("EduSmart-v4"));
+  const [showReset, setShowReset] = useState(false);
   // ── Auto-activate from portal launch URL ──────────────────────────────
   useEffect(() => {
     const urlKey = new URLSearchParams(window.location.search).get('key');
@@ -1507,6 +1628,17 @@ export default function App() {
   useEffect(() => { if (licence) setLS("edu_licence", licence); }, [licence]);
 
   if (!licence) return <LicenceGate onActivate={l => setLicence(l)} />;
+  if (!setupDone) return <SetupWizard
+    instLabel="School"
+    accentColor="#C9A84C"
+    bgGrad="linear-gradient(135deg,#0A2240,#152850)"
+    onComplete={({instName,instAddr,username,pin})=>{
+      const adminUser = { id:"USR-001", code:"ADM001", name:username, role:"admin", username:username.toLowerCase().replace(/\s+/g,"_"), pin, dept:"Administration", subject:"", assignedClass:"", email:"admin@school.gh", phone:"", active:true };
+      setUsers(prev=>[adminUser,...(prev||[]).filter(u=>u.role!=="admin")]);
+      setInstitution({name:instName,address:instAddr}); saveInstitution("EduSmart-v4",{name:instName,address:instAddr});
+      localStorage.setItem("edu_setup","1"); setSetupDone(true);
+    }}
+  />;
 
   const expired = new Date(licence.expiry) < new Date();
   if (expired) return (
