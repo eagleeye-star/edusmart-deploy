@@ -276,6 +276,18 @@ function LicenceGate({ onActivate }) {
           </div>
         )}
       </div>
+
+      {showReset&&(
+        <ResetModal
+          adminPin={users.find(u=>u.role==="admin")?.pin||""}
+          accent="#C9A84C" cardBg="#0f2040"
+          onCancel={()=>setShowReset(false)}
+          onConfirm={()=>{
+            ["edu_students","edu_fees","edu_grades","edu_attendance","edu_books","edu_loans","edu_old_students","edu_old_staff","edu_expelled","edu_school","edu_licence","edu_setup","EduSmart-v4_inst","edu_users"].forEach(k=>localStorage.removeItem(k));
+            setShowReset(false); window.location.reload();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1369,7 +1381,11 @@ function ResetModal({ onConfirm, onCancel, adminPin, accent, cardBg }) {
   const [pin,  setPin]  = useState("");
   const [err,  setErr]  = useState("");
   const [step, setStep] = useState(1);
-  const check = () => { if (pin !== String(adminPin)) { setErr("Incorrect PIN."); return; } setStep(2); };
+  const check = () => {
+    if (!adminPin) { setErr("No admin PIN set yet. Complete the setup wizard first."); return; }
+    if (pin !== String(adminPin)) { setErr("Incorrect PIN. Try again."); setPin(""); return; }
+    setStep(2);
+  };
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:20 }}>
       <div style={{ background: cardBg||"#1f2330", border:"1px solid #ef444455", borderRadius:14, padding:28, width:"min(94vw,400px)" }}>
