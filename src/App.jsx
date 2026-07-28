@@ -2382,7 +2382,7 @@ function Timetable({ timetables,setTimetables,curUser }) {
 }
 
 // ─── COMMUNICATION ───────────────────────────────────────────
-function Communication({ students,school,curUser,fees,attendance }) {
+function Communication({ students,school,curUser,fees,attendance,classes }) {
   const [tab,setTab]=useState("whatsapp");
   const [templateType,setTemplateType]=useState("fee_reminder");
   const [selStu,setSelStu]=useState("");
