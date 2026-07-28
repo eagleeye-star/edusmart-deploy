@@ -1,67 +1,99 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
-// ============================================================
-// LICENCE & SEED DATA
-// ============================================================
+// ─── LICENCE KEYS ───────────────────────────────────────────
 const LICENCE_KEYS = {
-  "EDUSMART-TRIAL-2024": { type: "trial", expiry: null, termLimit: 1 },
-  "EDUSMART-BASIC-ABCD": { type: "basic", expiry: "2026-12-31" },
-  "EDUSMART-PRO-XYZ9":   { type: "pro",   expiry: "2027-06-30" },
-  "EDUSMART-DEMO-0000":  { type: "trial", expiry: null, termLimit: 1 },
+  "EDUSMART-TRIAL-2024": { type:"trial", expiry:null },
+  "EDUSMART-DEMO-0000":  { type:"trial", expiry:null },
+  "EDUSMART-BASIC-ABCD": { type:"basic", expiry:"2026-12-31" },
+  "EDUSMART-PRO-XYZ9":   { type:"pro",   expiry:"2027-06-30" },
 };
 
-const INITIAL_SCHOOL = {
-  name: "Eikwe Basic School",
-  address: "Eikwe, Western Region, Ghana",
-  phone: "0XXXXXXXXX",
-  email: "info@eikwebasic.edu.gh",
-  logo: "",
-  motto: "Excellence in Education",
-  currentTerm: "Term 2",
-  currentYear: "2024/2025",
+// ─── ROLE ACCESS ─────────────────────────────────────────────
+const ROLE_ACCESS = {
+  "Admin":                ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","exams"],
+  "Headmaster":           ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","exams"],
+  "HOD":                  ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","exams"],
+  "Teacher":              ["dashboard","grades","attendance","timetable","exams","communication"],
+  "Account Office":       ["finance","payroll"],
+  "Librarian":            ["library"],
+  "Non-Teaching Staff":   ["dashboard"],
 };
 
 const ROLES = ["Admin","Headmaster","HOD","Teacher","Account Office","Librarian","Non-Teaching Staff"];
 
+const CLASSES = ["Creche","Nursery 1","Nursery 2","KG 1","KG 2","Class 1A","Class 1B","Class 2A","Class 2B","Class 3A","Class 3B","Class 4A","Class 4B","Class 5A","Class 5B","Class 6A","Class 6B","JHS 1","JHS 2","JHS 3"];
+const KG_CLASSES = ["Creche","Nursery 1","Nursery 2","KG 1","KG 2"];
+const PRIMARY_CLASSES = ["Class 1A","Class 1B","Class 2A","Class 2B","Class 3A","Class 3B","Class 4A","Class 4B","Class 5A","Class 5B","Class 6A","Class 6B"];
+const JHS_CLASSES = ["JHS 1","JHS 2","JHS 3"];
+const SUBJECTS = ["Mathematics","English Language","Science","Social Studies","ICT","French","RME","Creative Arts","Ghanaian Language","Physical Education","History","Pre-Technical Skills"];
+const EXAM_SUBJECTS = ["Mathematics","English Language","Science","Social Studies","ICT","French","RME","Creative Arts","Ghanaian Language"];
+
+const MILESTONE_CATEGORIES = {
+  "Motor Skills":    ["Crawling","Walking steadily","Running","Jumping","Climbing stairs","Holding pencil","Drawing shapes","Using scissors","Stacking blocks","Self-feeding"],
+  "Language":        ["Babbling","Saying first words","Two-word phrases","Simple sentences","Full sentences","Recognising own name","Following instructions","Storytelling","Singing songs"],
+  "Social":          ["Eye contact","Smiling at others","Playing alongside peers","Sharing toys","Taking turns","Following class rules","Greeting teachers","Making friends"],
+  "Cognitive":       ["Recognising colours","Counting 1-10","Recognising shapes","Sorting objects","Puzzles","Name recognition","Letter recognition","Number recognition"],
+  "Self-Care":       ["Potty trained","Washing hands","Dressing self","Packing bag","Eating independently","Drinking from cup","Brushing teeth"],
+};
+
+const MILESTONE_RATINGS = ["Not Yet","Emerging","Developing","Achieved"];
+
+// ─── SEED DATA ────────────────────────────────────────────────
+const INITIAL_SCHOOL = {
+  name:"Eikwe Private Basic School", address:"Eikwe, Western Region, Ghana",
+  phone:"0597147460", email:"info@eikwebasic.edu.gh", motto:"Excellence in Education",
+  currentTerm:"Term 2", currentYear:"2024/2025", principalName:"Mr. Gilbert Oscar Prah",
+};
+
 const INITIAL_USERS = [
-  { id:"USR001", name:"Gilbert Oscar Prah", role:"Admin",           pin:"1234", code:"ADM001", email:"admin@school.gh",    active:true },
-  { id:"USR002", name:"Mr. Kwame Asante",   role:"Headmaster",      pin:"2345", code:"HM001",  email:"head@school.gh",     active:true },
-  { id:"USR003", name:"Mrs. Ama Boateng",   role:"HOD",             pin:"3456", code:"HOD001", email:"hod@school.gh",      active:true },
-  { id:"USR004", name:"Mr. Kofi Mensah",    role:"Teacher",         pin:"4567", code:"TCH001", email:"kofi@school.gh",     active:true, classAssigned:"Class 6A" },
-  { id:"USR005", name:"Ms. Abena Frimpong", role:"Teacher",         pin:"5678", code:"TCH002", email:"abena@school.gh",    active:true, classAssigned:"Class 5B" },
-  { id:"USR006", name:"Mrs. Esi Andoh",     role:"Account Office",  pin:"6789", code:"ACC001", email:"accounts@school.gh", active:true },
-  { id:"USR007", name:"Mr. Yaw Tetteh",     role:"Librarian",       pin:"7890", code:"LIB001", email:"library@school.gh",  active:true },
-  { id:"USR008", name:"Mr. Nana Osei",      role:"Non-Teaching Staff", pin:"8901", code:"NTS001", email:"nts@school.gh",  active:true },
+  { id:"USR001", name:"Gilbert Oscar Prah",  role:"Admin",           pin:"1234", code:"ADM001", email:"admin@school.gh",    active:true, salary:3000, transport:300, housing:500, ssnit:true },
+  { id:"USR002", name:"Mr. Kwame Asante",    role:"Headmaster",      pin:"2345", code:"HM001",  email:"head@school.gh",     active:true, salary:2800, transport:300, housing:400, ssnit:true },
+  { id:"USR003", name:"Mrs. Ama Boateng",    role:"HOD",             pin:"3456", code:"HOD001", email:"hod@school.gh",      active:true, salary:2200, transport:200, housing:300, ssnit:true },
+  { id:"USR004", name:"Mr. Kofi Mensah",     role:"Teacher",         pin:"4567", code:"TCH001", email:"kofi@school.gh",     active:true, classAssigned:"Class 6A", salary:1800, transport:200, housing:0, ssnit:true },
+  { id:"USR005", name:"Ms. Abena Frimpong",  role:"Teacher",         pin:"5678", code:"TCH002", email:"abena@school.gh",    active:true, classAssigned:"Class 5B", salary:1800, transport:200, housing:0, ssnit:true },
+  { id:"USR006", name:"Mrs. Esi Andoh",      role:"Account Office",  pin:"6789", code:"ACC001", email:"accounts@school.gh", active:true, salary:1500, transport:150, housing:0, ssnit:true },
+  { id:"USR007", name:"Mr. Yaw Tetteh",      role:"Librarian",       pin:"7890", code:"LIB001", email:"library@school.gh",  active:true, salary:1200, transport:100, housing:0, ssnit:true },
+  { id:"USR008", name:"Mr. Nana Osei",       role:"Non-Teaching Staff", pin:"8901", code:"NTS001", email:"nts@school.gh",  active:true, salary:900,  transport:80,  housing:0, ssnit:false },
+  { id:"USR009", name:"Ms. Akosua Darko",    role:"Teacher",         pin:"9012", code:"TCH003", email:"akosua@school.gh",   active:true, classAssigned:"KG 1", salary:1600, transport:150, housing:0, ssnit:true },
 ];
 
-const CLASSES = ["Class 1A","Class 1B","Class 2A","Class 2B","Class 3A","Class 4A","Class 5A","Class 5B","Class 6A","Class 6B","JHS 1","JHS 2","JHS 3"];
-
-const SUBJECTS = ["Mathematics","English Language","Science","Social Studies","ICT","French","RME","Creative Arts","Ghanaian Language","Physical Education","History","Pre-Technical Skills"];
-
 const INITIAL_STUDENTS = [
-  { id:"STU001", name:"Kwame Agyei",      class:"Class 6A", dob:"2012-03-15", gender:"Male",   guardian:"Mr. Agyei",   phone:"0241000001", fees:500, paid:500, status:"active" },
-  { id:"STU002", name:"Ama Sarpong",      class:"Class 6A", dob:"2012-07-22", gender:"Female", guardian:"Mrs. Sarpong",phone:"0241000002", fees:500, paid:300, status:"active" },
-  { id:"STU003", name:"Kofi Mensah Jr",   class:"Class 5B", dob:"2013-01-10", gender:"Male",   guardian:"Mr. Mensah",  phone:"0241000003", fees:500, paid:500, status:"active" },
-  { id:"STU004", name:"Abena Osei",       class:"Class 5B", dob:"2013-09-05", gender:"Female", guardian:"Mrs. Osei",   phone:"0241000004", fees:500, paid:200, status:"active" },
-  { id:"STU005", name:"Yaw Darko",        class:"JHS 1",    dob:"2011-11-30", gender:"Male",   guardian:"Mr. Darko",   phone:"0241000005", fees:600, paid:600, status:"active" },
-  { id:"STU006", name:"Akua Boateng",     class:"JHS 1",    dob:"2011-06-18", gender:"Female", guardian:"Mrs. Boateng",phone:"0241000006", fees:600, paid:400, status:"active" },
-  { id:"STU007", name:"Kweku Asante",     class:"JHS 2",    dob:"2010-04-25", gender:"Male",   guardian:"Mr. Asante",  phone:"0241000007", fees:600, paid:600, status:"active" },
-  { id:"STU008", name:"Esi Tetteh",       class:"JHS 3",    dob:"2009-08-12", gender:"Female", guardian:"Mr. Tetteh",  phone:"0241000008", fees:700, paid:350, status:"active" },
-  { id:"STU009", name:"Old Graduate One", class:"JHS 3",    dob:"2007-02-01", gender:"Male",   guardian:"Parent",      phone:"0241000009", fees:700, paid:700, status:"graduated" },
-  { id:"STU010", name:"Dropped Student",  class:"Class 4A", dob:"2014-05-20", gender:"Male",   guardian:"Parent",      phone:"0241000010", fees:500, paid:100, status:"dropout" },
+  { id:"STU001", name:"Kwame Agyei",      class:"Class 6A", dob:"2012-03-15", gender:"Male",   guardian:"Mr. Agyei",    phone:"0241000001", fees:500, paid:500, status:"active", section:"primary" },
+  { id:"STU002", name:"Ama Sarpong",      class:"Class 6A", dob:"2012-07-22", gender:"Female", guardian:"Mrs. Sarpong", phone:"0241000002", fees:500, paid:300, status:"active", section:"primary" },
+  { id:"STU003", name:"Kofi Mensah Jr",   class:"Class 5B", dob:"2013-01-10", gender:"Male",   guardian:"Mr. Mensah",   phone:"0241000003", fees:500, paid:500, status:"active", section:"primary" },
+  { id:"STU004", name:"Abena Osei",       class:"Class 5B", dob:"2013-09-05", gender:"Female", guardian:"Mrs. Osei",    phone:"0241000004", fees:500, paid:200, status:"active", section:"primary" },
+  { id:"STU005", name:"Yaw Darko",        class:"JHS 1",    dob:"2011-11-30", gender:"Male",   guardian:"Mr. Darko",    phone:"0241000005", fees:600, paid:600, status:"active", section:"jhs" },
+  { id:"STU006", name:"Akua Boateng",     class:"JHS 1",    dob:"2011-06-18", gender:"Female", guardian:"Mrs. Boateng", phone:"0241000006", fees:600, paid:400, status:"active", section:"jhs" },
+  { id:"STU007", name:"Kweku Asante",     class:"JHS 2",    dob:"2010-04-25", gender:"Male",   guardian:"Mr. Asante",   phone:"0241000007", fees:600, paid:600, status:"active", section:"jhs" },
+  { id:"STU008", name:"Esi Tetteh",       class:"JHS 3",    dob:"2009-08-12", gender:"Female", guardian:"Mr. Tetteh",   phone:"0241000008", fees:700, paid:350, status:"active", section:"jhs" },
+  { id:"STU009", name:"Kofi Bright",      class:"KG 1",     dob:"2020-05-10", gender:"Male",   guardian:"Mrs. Bright",  phone:"0241000009", fees:400, paid:400, status:"active", section:"nursery" },
+  { id:"STU010", name:"Abena Asare",      class:"KG 2",     dob:"2019-08-22", gender:"Female", guardian:"Mr. Asare",    phone:"0241000010", fees:400, paid:200, status:"active", section:"nursery" },
+  { id:"STU011", name:"Old Graduate",     class:"JHS 3",    dob:"2007-02-01", gender:"Male",   guardian:"Parent",       phone:"0241000011", fees:700, paid:700, status:"graduated", section:"jhs" },
+  { id:"STU012", name:"Dropped Student",  class:"Class 4A", dob:"2014-05-20", gender:"Male",   guardian:"Parent",       phone:"0241000012", fees:500, paid:100, status:"dropout",   section:"primary" },
 ];
 
 const INITIAL_GRADES = [
-  { id:"GRD001", studentId:"STU001", subject:"Mathematics",    class:"Class 6A", score:85, grade:"A", term:"Term 1", year:"2024/2025", enteredBy:"TCH001", date:"2025-01-10" },
-  { id:"GRD002", studentId:"STU001", subject:"English Language",class:"Class 6A", score:78, grade:"B", term:"Term 1", year:"2024/2025", enteredBy:"TCH001", date:"2025-01-10" },
-  { id:"GRD003", studentId:"STU002", subject:"Mathematics",    class:"Class 6A", score:92, grade:"A", term:"Term 1", year:"2024/2025", enteredBy:"TCH001", date:"2025-01-10" },
-  { id:"GRD004", studentId:"STU003", subject:"Science",        class:"Class 5B", score:70, grade:"B", term:"Term 1", year:"2024/2025", enteredBy:"TCH002", date:"2025-01-10" },
+  { id:"GRD001", studentId:"STU001", subject:"Mathematics",     class:"Class 6A", ca:25, exam:60, score:85, grade:"A", term:"Term 1", year:"2024/2025", enteredBy:"TCH001", date:"2025-01-10" },
+  { id:"GRD002", studentId:"STU001", subject:"English Language",class:"Class 6A", ca:22, exam:56, score:78, grade:"B", term:"Term 1", year:"2024/2025", enteredBy:"TCH001", date:"2025-01-10" },
+  { id:"GRD003", studentId:"STU002", subject:"Mathematics",     class:"Class 6A", ca:28, exam:64, score:92, grade:"A", term:"Term 1", year:"2024/2025", enteredBy:"TCH001", date:"2025-01-10" },
+  { id:"GRD004", studentId:"STU003", subject:"Science",         class:"Class 5B", ca:20, exam:50, score:70, grade:"B", term:"Term 1", year:"2024/2025", enteredBy:"TCH002", date:"2025-01-10" },
+  { id:"GRD005", studentId:"STU005", subject:"Mathematics",     class:"JHS 1",    ca:24, exam:58, score:82, grade:"A", term:"Term 1", year:"2024/2025", enteredBy:"TCH001", date:"2025-01-10" },
+  { id:"GRD006", studentId:"STU008", subject:"Mathematics",     class:"JHS 3",    ca:18, exam:45, score:63, grade:"C", term:"Term 1", year:"2024/2025", enteredBy:"TCH001", date:"2025-01-10" },
+];
+
+const INITIAL_MOCK_EXAMS = [
+  { id:"MCK001", studentId:"STU008", subject:"Mathematics",     score:62, term:"Term 1", year:"2024/2025", examType:"Mock 1", enteredBy:"TCH001", date:"2025-01-12" },
+  { id:"MCK002", studentId:"STU008", subject:"English Language",score:58, term:"Term 1", year:"2024/2025", examType:"Mock 1", enteredBy:"TCH001", date:"2025-01-12" },
+  { id:"MCK003", studentId:"STU007", subject:"Mathematics",     score:75, term:"Term 1", year:"2024/2025", examType:"Mock 1", enteredBy:"TCH001", date:"2025-01-12" },
 ];
 
 const INITIAL_ATTENDANCE = [
   { id:"ATT001", studentId:"STU001", class:"Class 6A", date:"2025-01-13", status:"Present", enteredBy:"TCH001" },
   { id:"ATT002", studentId:"STU002", class:"Class 6A", date:"2025-01-13", status:"Absent",  enteredBy:"TCH001" },
   { id:"ATT003", studentId:"STU003", class:"Class 5B", date:"2025-01-13", status:"Present", enteredBy:"TCH002" },
+  { id:"ATT004", studentId:"STU001", class:"Class 6A", date:"2025-01-14", status:"Present", enteredBy:"TCH001" },
+  { id:"ATT005", studentId:"STU002", class:"Class 6A", date:"2025-01-14", status:"Absent",  enteredBy:"TCH001" },
+  { id:"ATT006", studentId:"STU002", class:"Class 6A", date:"2025-01-15", status:"Absent",  enteredBy:"TCH001" },
 ];
 
 const INITIAL_FEES = [
@@ -72,23 +104,40 @@ const INITIAL_FEES = [
 ];
 
 const INITIAL_EXPENSES = [
-  { id:"EXP001", description:"Chalk and Stationery",   amount:450,  date:"2025-01-03", category:"Supplies",     enteredBy:"ACC001" },
-  { id:"EXP002", description:"Electricity Bill",        amount:320,  date:"2025-01-05", category:"Utilities",    enteredBy:"ACC001" },
-  { id:"EXP003", description:"Cleaning Materials",      amount:200,  date:"2025-01-07", category:"Maintenance",  enteredBy:"ACC001" },
-  { id:"EXP004", description:"Staff Welfare",           amount:800,  date:"2025-01-10", category:"Staff",        enteredBy:"ACC001" },
+  { id:"EXP001", description:"Chalk and Stationery",  amount:450, date:"2025-01-03", category:"Supplies",    enteredBy:"ACC001" },
+  { id:"EXP002", description:"Electricity Bill",       amount:320, date:"2025-01-05", category:"Utilities",   enteredBy:"ACC001" },
+  { id:"EXP003", description:"Cleaning Materials",     amount:200, date:"2025-01-07", category:"Maintenance", enteredBy:"ACC001" },
+  { id:"EXP004", description:"Staff Welfare",          amount:800, date:"2025-01-10", category:"Staff",       enteredBy:"ACC001" },
+];
+
+const INITIAL_PAYROLL = [
+  { id:"PAY001", staffId:"USR004", month:"January", year:"2025", baseSalary:1800, transport:200, housing:0, responsibility:0, overtime:0, substitution:0, loans:0, absenceDeductions:0, ssnitEmployee:99, ssnitEmployer:234, paye:45, netPay:0, status:"paid", processedBy:"ACC001", date:"2025-01-31" },
 ];
 
 const INITIAL_BOOKS = [
-  { id:"BK001", title:"Mathematics for Basic Schools",  author:"GES",        isbn:"978-001", copies:15, available:12, category:"Textbook" },
-  { id:"BK002", title:"English Language Course Book",   author:"GES",        isbn:"978-002", copies:20, available:18, category:"Textbook" },
-  { id:"BK003", title:"Science Made Easy",              author:"Aidoo K.",   isbn:"978-003", copies:10, available:9,  category:"Reference" },
-  { id:"BK004", title:"Ghana: Our Heritage",            author:"Ministry",   isbn:"978-004", copies:8,  available:8,  category:"Library" },
-  { id:"BK005", title:"Stories of Our Land",            author:"Asante T.",  isbn:"978-005", copies:12, available:10, category:"Fiction" },
+  { id:"BK001", title:"Mathematics for Basic Schools", author:"GES",      isbn:"978-001", copies:15, available:12, category:"Textbook" },
+  { id:"BK002", title:"English Language Course Book",  author:"GES",      isbn:"978-002", copies:20, available:18, category:"Textbook" },
+  { id:"BK003", title:"Science Made Easy",             author:"Aidoo K.", isbn:"978-003", copies:10, available:9,  category:"Reference" },
 ];
 
 const INITIAL_BORROWS = [
   { id:"BOR001", bookId:"BK001", borrowerId:"STU001", borrowerType:"Student", borrowDate:"2025-01-10", dueDate:"2025-01-24", returnDate:null, enteredBy:"LIB001" },
-  { id:"BOR002", bookId:"BK003", borrowerId:"STU003", borrowerType:"Student", borrowDate:"2025-01-08", dueDate:"2025-01-22", returnDate:"2025-01-15", enteredBy:"LIB001" },
+];
+
+const INITIAL_NURSERY_LOGS = [
+  { id:"NRS001", studentId:"STU009", date:"2025-01-13", napStart:"09:30", napEnd:"10:30", feedingTimes:"07:30,12:00", feedingNotes:"Ate well", hygiene:"No incidents", mood:"Happy", notes:"Good day", enteredBy:"TCH003" },
+];
+
+const INITIAL_MILESTONES = [
+  { id:"MLS001", studentId:"STU009", category:"Motor Skills", milestone:"Walking steadily", rating:"Achieved",   term:"Term 1", year:"2024/2025", enteredBy:"TCH003", date:"2025-01-10" },
+  { id:"MLS002", studentId:"STU009", category:"Language",     milestone:"Two-word phrases", rating:"Developing", term:"Term 1", year:"2024/2025", enteredBy:"TCH003", date:"2025-01-10" },
+  { id:"MLS003", studentId:"STU010", category:"Self-Care",    milestone:"Potty trained",    rating:"Emerging",   term:"Term 1", year:"2024/2025", enteredBy:"TCH003", date:"2025-01-10" },
+];
+
+const INITIAL_EXAM_SCHEDULE = [
+  { id:"EXM001", class:"JHS 3",    subject:"Mathematics",     date:"2025-02-10", startTime:"08:00", endTime:"10:00", venue:"Main Hall",  createdBy:"ADM001" },
+  { id:"EXM002", class:"JHS 3",    subject:"English Language",date:"2025-02-11", startTime:"08:00", endTime:"10:00", venue:"Main Hall",  createdBy:"ADM001" },
+  { id:"EXM003", class:"Class 6A", subject:"Mathematics",     date:"2025-02-10", startTime:"10:30", endTime:"12:00", venue:"Classroom",  createdBy:"ADM001" },
 ];
 
 const TIMETABLES = {
@@ -109,1256 +158,1595 @@ const TIMETABLES = {
 };
 
 const AUDIT_LOG_INITIAL = [
-  { id:"AUD001", user:"ADM001", action:"System Setup",        section:"Settings",  timestamp:"2025-01-01 08:00:00" },
-  { id:"AUD002", user:"TCH001", action:"Entered Grades",      section:"Grades",    timestamp:"2025-01-10 09:15:00" },
-  { id:"AUD003", user:"ACC001", action:"Recorded Fee Payment",section:"Finance",   timestamp:"2025-01-05 10:30:00" },
-  { id:"AUD004", user:"LIB001", action:"Book Borrowed",       section:"Library",   timestamp:"2025-01-10 11:00:00" },
+  { id:"AUD001", user:"ADM001", action:"System Setup",        section:"Settings", timestamp:"2025-01-01 08:00:00" },
+  { id:"AUD002", user:"TCH001", action:"Entered Grades",      section:"Grades",   timestamp:"2025-01-10 09:15:00" },
+  { id:"AUD003", user:"ACC001", action:"Recorded Fee Payment",section:"Finance",  timestamp:"2025-01-05 10:30:00" },
 ];
 
-// ============================================================
-// ROLE ACCESS MAP
-// ============================================================
-const ROLE_ACCESS = {
-  "Admin":              ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","settings","archive","idcards","audit"],
-  "Headmaster":         ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","settings","archive","idcards","audit"],
-  "HOD":                ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","settings","archive","idcards","audit"],
-  "Teacher":            ["dashboard","grades","attendance","timetable"],
-  "Account Office":     ["finance"],
-  "Librarian":          ["library"],
-  "Non-Teaching Staff": ["dashboard"],
+// ─── HELPERS ──────────────────────────────────────────────────
+const calcGrade = s => s>=80?"A":s>=70?"B":s>=60?"C":s>=50?"D":s>=45?"E":"F";
+const calcCA    = ca  => Math.round((ca/30)*30);  // CA out of 30
+const calcExam  = ex  => Math.round((ex/70)*70);  // Exam out of 70
+const formatGHS = n   => `GH₵ ${Number(n||0).toFixed(2)}`;
+const todayStr  = ()  => new Date().toISOString().split("T")[0];
+const nowStr    = ()  => new Date().toLocaleString("en-GB");
+const uid       = pre => `${pre}${Date.now().toString().slice(-7)}`;
+
+// Ghana PAYE tax bands 2024 (monthly)
+const calcPAYE = (monthly) => {
+  if (monthly <= 490)  return 0;
+  if (monthly <= 700)  return (monthly - 490) * 0.05;
+  if (monthly <= 1500) return 10.5 + (monthly - 700) * 0.10;
+  if (monthly <= 3500) return 90.5 + (monthly - 1500) * 0.175;
+  if (monthly <= 6000) return 440.5 + (monthly - 3500) * 0.25;
+  return 1065.5 + (monthly - 6000) * 0.30;
 };
 
-// ============================================================
-// HELPERS
-// ============================================================
-const calcGrade = (score) => {
-  if (score>=80) return "A"; if (score>=70) return "B"; if (score>=60) return "C";
-  if (score>=50) return "D"; if (score>=45) return "E"; return "F";
-};
+// ─── SHARED UI ────────────────────────────────────────────────
+const inp = { width:"100%", padding:"8px 12px", borderRadius:8, border:"1.5px solid #d1d5db", fontSize:13, boxSizing:"border-box", fontFamily:"inherit" };
+const btnP = { padding:"9px 20px", background:"#1e40af", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:600 };
+const btnS = { padding:"9px 20px", background:"#e5e7eb", color:"#374151", border:"none", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:600 };
+const btnSm = { padding:"5px 10px", border:"none", borderRadius:6, cursor:"pointer", fontSize:11, fontWeight:600 };
 
-const formatGHS = (n) => `GH₵ ${Number(n||0).toFixed(2)}`;
-const today = () => new Date().toISOString().split("T")[0];
-const now   = () => new Date().toLocaleString("en-GB");
-const uid   = (prefix) => `${prefix}${Date.now().toString().slice(-6)}`;
+function Modal({ title, onClose, children, wide }) {
+  return (
+    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:16 }}>
+      <div style={{ background:"#fff",borderRadius:14,padding:24,maxWidth:wide?680:520,width:"100%",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
+          <h3 style={{ margin:0,fontSize:16,fontWeight:700,color:"#0f172a" }}>{title}</h3>
+          <button onClick={onClose} style={{ background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#6b7280",lineHeight:1 }}>×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
 
-// ============================================================
-// MAIN APP
-// ============================================================
+function Row({ label, children }) {
+  return (
+    <div style={{ marginBottom:12 }}>
+      <label style={{ display:"block",fontSize:12,fontWeight:600,color:"#374151",marginBottom:4 }}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function Card({ children, style }) {
+  return <div style={{ background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.08)",...style }}>{children}</div>;
+}
+
+function StatCard({ icon, label, value, color, sub }) {
+  return (
+    <div style={{ background:"#fff",borderRadius:12,padding:18,boxShadow:"0 1px 4px rgba(0,0,0,0.08)",borderLeft:`4px solid ${color}` }}>
+      <div style={{ fontSize:22,marginBottom:4 }}>{icon}</div>
+      <div style={{ fontSize:20,fontWeight:700,color }}>{value}</div>
+      <div style={{ fontSize:12,color:"#64748b" }}>{label}</div>
+      {sub&&<div style={{ fontSize:11,color:"#9ca3af",marginTop:2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function Badge({ text, color, bg }) {
+  return <span style={{ background:bg||color+"22",color,padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:600 }}>{text}</span>;
+}
+
+function Table({ cols, rows, emptyMsg }) {
+  return (
+    <div style={{ background:"#fff",borderRadius:12,overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
+      <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
+        <thead>
+          <tr style={{ background:"#f8fafc" }}>
+            {cols.map(c=><th key={c} style={{ padding:"10px 12px",textAlign:"left",fontWeight:600,color:"#374151",borderBottom:"1px solid #e5e7eb",whiteSpace:"nowrap" }}>{c}</th>)}
+          </tr>
+        </thead>
+        <tbody>{rows}</tbody>
+      </table>
+      {(!rows||rows.length===0)&&<p style={{ textAlign:"center",color:"#9ca3af",padding:24 }}>{emptyMsg||"No records found."}</p>}
+    </div>
+  );
+}
+
+function TD({ children, bold, color, small }) {
+  return <td style={{ padding:"8px 12px",fontWeight:bold?600:400,color:color||"#374151",fontSize:small?11:13 }}>{children}</td>;
+}
+
+function Tabs({ tabs, active, onChange }) {
+  return (
+    <div style={{ display:"flex",gap:6,marginBottom:16,flexWrap:"wrap" }}>
+      {tabs.map(t=>(
+        <button key={t.key} onClick={()=>onChange(t.key)}
+          style={{ padding:"8px 16px",borderRadius:8,border:"none",cursor:"pointer",fontWeight:600,fontSize:13,
+            background:active===t.key?"#1e40af":"#e5e7eb",color:active===t.key?"#fff":"#374151" }}>
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── MAIN APP ─────────────────────────────────────────────────
 export default function EduSmart() {
-  // LICENCE
-  const [licenced, setLicenced]   = useState(false);
-  const [licenceKey, setLicenceKey] = useState("");
-  const [licenceInfo, setLicenceInfo] = useState(null);
-  const [licError, setLicError]   = useState("");
+  const [licenced,  setLicenced]  = useState(false);
+  const [licKey,    setLicKey]    = useState("");
+  const [licInfo,   setLicInfo]   = useState(null);
+  const [licErr,    setLicErr]    = useState("");
+  const [loggedIn,  setLoggedIn]  = useState(false);
+  const [curUser,   setCurUser]   = useState(null);
+  const [selUser,   setSelUser]   = useState("");
+  const [pin,       setPin]       = useState("");
+  const [authErr,   setAuthErr]   = useState("");
+  const [section,   setSection]   = useState("dashboard");
+  const [notif,     setNotif]     = useState(null);
+  const [lastActivity, setLastActivity] = useState(Date.now());
+  const [failedLogins, setFailedLogins] = useState({});
 
-  // AUTH
-  const [loggedIn, setLoggedIn]   = useState(false);
-  const [currentUser, setCurrentUser] = useState(null);
-  const [pinInput, setPinInput]   = useState("");
-  const [selectedUserId, setSelectedUserId] = useState("");
-  const [authError, setAuthError] = useState("");
-
-  // DATA
-  const [school, setSchool]       = useState(INITIAL_SCHOOL);
-  const [users, setUsers]         = useState(INITIAL_USERS);
-  const [students, setStudents]   = useState(INITIAL_STUDENTS);
-  const [grades, setGrades]       = useState(INITIAL_GRADES);
+  const [school,     setSchool]     = useState(INITIAL_SCHOOL);
+  const [users,      setUsers]      = useState(INITIAL_USERS);
+  const [students,   setStudents]   = useState(INITIAL_STUDENTS);
+  const [grades,     setGrades]     = useState(INITIAL_GRADES);
+  const [mockExams,  setMockExams]  = useState(INITIAL_MOCK_EXAMS);
   const [attendance, setAttendance] = useState(INITIAL_ATTENDANCE);
-  const [fees, setFees]           = useState(INITIAL_FEES);
-  const [expenses, setExpenses]   = useState(INITIAL_EXPENSES);
-  const [books, setBooks]         = useState(INITIAL_BOOKS);
-  const [borrows, setBorrows]     = useState(INITIAL_BORROWS);
-  const [auditLog, setAuditLog]   = useState(AUDIT_LOG_INITIAL);
+  const [fees,       setFees]       = useState(INITIAL_FEES);
+  const [expenses,   setExpenses]   = useState(INITIAL_EXPENSES);
+  const [payroll,    setPayroll]    = useState(INITIAL_PAYROLL);
+  const [books,      setBooks]      = useState(INITIAL_BOOKS);
+  const [borrows,    setBorrows]    = useState(INITIAL_BORROWS);
+  const [nurseryLogs,setNurseryLogs]= useState(INITIAL_NURSERY_LOGS);
+  const [milestones, setMilestones] = useState(INITIAL_MILESTONES);
+  const [examSchedule,setExamSchedule]=useState(INITIAL_EXAM_SCHEDULE);
+  const [timetables, setTimetables] = useState(TIMETABLES);
+  const [auditLog,   setAuditLog]   = useState(AUDIT_LOG_INITIAL);
 
-  // UI
-  const [activeSection, setActiveSection] = useState("dashboard");
-  const [printMode, setPrintMode] = useState(false);
-  const [notification, setNotification] = useState(null);
-  const printRef = useRef(null);
+  const notify = (msg, type="success") => { setNotif({msg,type}); setTimeout(()=>setNotif(null),3500); };
 
-  const notify = (msg, type="success") => {
-    setNotification({ msg, type });
-    setTimeout(() => setNotification(null), 3000);
-  };
+  const addAudit = useCallback((action, sec) => {
+    if (!curUser) return;
+    setAuditLog(p=>[...p,{ id:uid("AUD"), user:curUser.code, action, section:sec, timestamp:nowStr() }]);
+  },[curUser]);
 
-  const addAudit = (action, section) => {
-    if (!currentUser) return;
-    setAuditLog(prev => [...prev, {
-      id: uid("AUD"), user: currentUser.code, action, section, timestamp: now()
-    }]);
-  };
-
-  const canAccess = (section) => {
-    if (!currentUser) return false;
-    return (ROLE_ACCESS[currentUser.role]||[]).includes(section);
-  };
+  // Session timeout — 15 min
+  useEffect(() => {
+    const track = () => setLastActivity(Date.now());
+    window.addEventListener("mousemove",track); window.addEventListener("keydown",track);
+    const check = setInterval(()=>{ if(loggedIn && Date.now()-lastActivity>900000){ setLoggedIn(false);setCurUser(null);notify("Session expired — please log in again","error"); }},30000);
+    return ()=>{ window.removeEventListener("mousemove",track); window.removeEventListener("keydown",track); clearInterval(check); };
+  },[loggedIn,lastActivity]);
 
   function doLogin() {
-    const user = users.find(u=>u.id===selectedUserId && u.pin===pinInput && u.active);
-    if (!user) { setAuthError("Invalid credentials. Check your PIN."); return; }
-    setCurrentUser(user);
-    setLoggedIn(true);
-    setPinInput(""); setAuthError("");
-    const sections = ROLE_ACCESS[user.role]||[];
-    setActiveSection(sections[0]||"dashboard");
+    const u = users.find(x=>x.id===selUser && x.active);
+    if (!u) { setAuthErr("User not found or inactive."); return; }
+    const fails = failedLogins[selUser]||0;
+    if (fails >= 3) { setAuthErr("Account locked after 3 failed attempts. Contact Admin."); return; }
+    if (u.pin !== pin) {
+      const newFails = fails+1;
+      setFailedLogins(p=>({...p,[selUser]:newFails}));
+      setAuthErr(newFails>=3?"Account locked. Contact Admin to unlock.":`Wrong PIN. ${3-newFails} attempt(s) remaining.`);
+      return;
+    }
+    setFailedLogins(p=>({...p,[selUser]:0}));
+    setCurUser(u); setLoggedIn(true); setPin(""); setAuthErr("");
+    const secs = ROLE_ACCESS[u.role]||[];
+    setSection(secs[0]||"dashboard");
   }
 
-  // ---- LICENCE SCREEN ----
-  if (!licenced) {
-    return (
-      <div style={{ minHeight:"100vh", background:"linear-gradient(135deg,#0f172a,#1e3a5f)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Segoe UI',sans-serif" }}>
-        <div style={{ background:"#fff", borderRadius:16, padding:40, maxWidth:480, width:"90%", boxShadow:"0 20px 60px rgba(0,0,0,0.4)" }}>
-          <div style={{ textAlign:"center", marginBottom:24 }}>
-            <div style={{ fontSize:48, marginBottom:8 }}>🏫</div>
-            <h1 style={{ fontSize:28, fontWeight:700, color:"#0f172a", margin:0 }}>EduSmart</h1>
-            <p style={{ color:"#64748b", margin:"6px 0 0" }}>School Management System</p>
-          </div>
-          <div style={{ background:"#f0f9ff", borderRadius:10, padding:16, marginBottom:20, borderLeft:"4px solid #0ea5e9" }}>
-            <p style={{ margin:0, fontSize:13, color:"#0369a1" }}>
-              <strong>Trial Key:</strong> EDUSMART-TRIAL-2024 <br/>
-              <strong>Demo Key:</strong> EDUSMART-DEMO-0000
-            </p>
-          </div>
-          <div style={{ marginBottom:16 }}>
-            <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:6 }}>Licence Key</label>
-            <input
-              value={licenceKey} onChange={e=>setLicenceKey(e.target.value.toUpperCase())}
-              placeholder="e.g. EDUSMART-TRIAL-2024"
-              style={{ width:"100%", padding:"10px 14px", borderRadius:8, border:"1.5px solid #d1d5db", fontSize:14, boxSizing:"border-box" }}
-            />
-          </div>
-          {licError && <p style={{ color:"#dc2626", fontSize:13, marginBottom:10 }}>{licError}</p>}
-          <button
-            onClick={() => {
-              const k = LICENCE_KEYS[licenceKey.trim()];
-              if (!k) { setLicError("Invalid licence key. Contact EduSmart support."); return; }
-              if (k.expiry && new Date(k.expiry) < new Date()) { setLicError("Licence expired. Please renew."); return; }
-              setLicenceInfo({ ...k, key: licenceKey.trim() });
-              setLicenced(true);
-              setLicError("");
-            }}
-            style={{ width:"100%", padding:"12px", background:"#1e3a8a", color:"#fff", border:"none", borderRadius:8, fontSize:15, fontWeight:600, cursor:"pointer" }}
-          >Activate & Continue</button>
-          <p style={{ textAlign:"center", fontSize:12, color:"#9ca3af", marginTop:12 }}>
-            For licence purchase: <strong>EduSmart Support</strong> | GH₵ 500/term or GH₵ 1,500/year
-          </p>
+  function doLogout() { setLoggedIn(false); setCurUser(null); setPin(""); setSelUser(""); }
+
+  const unlockUser = (uid2) => { setFailedLogins(p=>({...p,[uid2]:0})); notify("Account unlocked"); };
+
+  // ─── LICENCE SCREEN ───
+  if (!licenced) return (
+    <div style={{ minHeight:"100vh",background:"linear-gradient(135deg,#0f172a,#1e3a5f)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Segoe UI',sans-serif" }}>
+      <div style={{ background:"#fff",borderRadius:16,padding:40,maxWidth:480,width:"90%",boxShadow:"0 20px 60px rgba(0,0,0,0.4)" }}>
+        <div style={{ textAlign:"center",marginBottom:24 }}>
+          <div style={{ fontSize:52 }}>🏫</div>
+          <h1 style={{ fontSize:28,fontWeight:700,color:"#0f172a",margin:"8px 0 4px" }}>EduSmart</h1>
+          <p style={{ color:"#64748b",margin:0,fontSize:13 }}>School Manager v5.0</p>
         </div>
-      </div>
-    );
-  }
-
-  // ---- LOGIN SCREEN ----
-  if (!loggedIn) {
-    return (
-      <div style={{ minHeight:"100vh", background:"linear-gradient(135deg,#0f172a,#1e3a5f)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Segoe UI',sans-serif" }}>
-        <div style={{ background:"#fff", borderRadius:16, padding:40, maxWidth:440, width:"90%", boxShadow:"0 20px 60px rgba(0,0,0,0.4)" }}>
-          <div style={{ textAlign:"center", marginBottom:24 }}>
-            <div style={{ fontSize:42, marginBottom:6 }}>🔐</div>
-            <h2 style={{ fontSize:22, fontWeight:700, color:"#0f172a", margin:0 }}>Staff Login</h2>
-            <p style={{ color:"#64748b", fontSize:13, margin:"6px 0 0" }}>{school.name}</p>
-            <span style={{ background: licenceInfo?.type==="trial"?"#fef3c7":"#dcfce7", color: licenceInfo?.type==="trial"?"#92400e":"#166534", padding:"2px 10px", borderRadius:12, fontSize:11, fontWeight:600 }}>
-              {licenceInfo?.type?.toUpperCase()} LICENCE
-            </span>
-          </div>
-          <div style={{ marginBottom:14 }}>
-            <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:6 }}>Select Staff Member</label>
-            <select value={selectedUserId} onChange={e=>setSelectedUserId(e.target.value)}
-              style={{ width:"100%", padding:"10px 14px", borderRadius:8, border:"1.5px solid #d1d5db", fontSize:14, boxSizing:"border-box" }}>
-              <option value="">-- Select your name --</option>
-              {users.filter(u=>u.active).map(u=>(
-                <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
-              ))}
-            </select>
-          </div>
-          <div style={{ marginBottom:14 }}>
-            <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:6 }}>PIN</label>
-            <input type="password" value={pinInput} onChange={e=>setPinInput(e.target.value)}
-              placeholder="Enter your 4-digit PIN"
-              style={{ width:"100%", padding:"10px 14px", borderRadius:8, border:"1.5px solid #d1d5db", fontSize:14, boxSizing:"border-box" }}
-              onKeyDown={e=>e.key==="Enter"&&doLogin()}
-            />
-          </div>
-          {authError && <p style={{ color:"#dc2626", fontSize:13, marginBottom:10 }}>{authError}</p>}
-          <button onClick={doLogin}
-            style={{ width:"100%", padding:"12px", background:"#1e3a8a", color:"#fff", border:"none", borderRadius:8, fontSize:15, fontWeight:600, cursor:"pointer" }}>
-            Login
-          </button>
-          <p style={{ textAlign:"center", fontSize:11, color:"#9ca3af", marginTop:10 }}>
-            Powered by EduSmart v4.0 | Licenced to {school.name}
-          </p>
+        <div style={{ background:"#f0f9ff",borderRadius:10,padding:14,marginBottom:20,borderLeft:"4px solid #0ea5e9",fontSize:12,color:"#0369a1" }}>
+          <strong>Trial Key:</strong> EDUSMART-TRIAL-2024 &nbsp;|&nbsp; <strong>Demo:</strong> EDUSMART-DEMO-0000
         </div>
+        <Row label="Licence Key">
+          <input value={licKey} onChange={e=>setLicKey(e.target.value.toUpperCase())} placeholder="EDUSMART-XXXXX-XXXX"
+            style={inp} onKeyDown={e=>e.key==="Enter"&&activateLicence()}/>
+        </Row>
+        {licErr&&<p style={{ color:"#dc2626",fontSize:13,marginBottom:10 }}>{licErr}</p>}
+        <button onClick={activateLicence} style={{ ...btnP,width:"100%",padding:12,fontSize:15 }}>Activate & Continue</button>
+        <p style={{ textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:12 }}>Purchase: 0597147460 | aifarms101@gmail.com</p>
       </div>
-    );
+    </div>
+  );
+
+  function activateLicence() {
+    const k = LICENCE_KEYS[licKey.trim()];
+    if (!k) { setLicErr("Invalid key. Contact EduSmart support."); return; }
+    if (k.expiry && new Date(k.expiry)<new Date()) { setLicErr("Licence expired. Please renew."); return; }
+    setLicInfo({...k,key:licKey.trim()}); setLicenced(true); setLicErr("");
   }
 
-  // ---- MAIN LAYOUT ----
-  const access = ROLE_ACCESS[currentUser?.role]||[];
+  // ─── LOGIN SCREEN ───
+  if (!loggedIn) return (
+    <div style={{ minHeight:"100vh",background:"linear-gradient(135deg,#0f172a,#1e3a5f)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Segoe UI',sans-serif" }}>
+      <div style={{ background:"#fff",borderRadius:16,padding:40,maxWidth:440,width:"90%",boxShadow:"0 20px 60px rgba(0,0,0,0.4)" }}>
+        <div style={{ textAlign:"center",marginBottom:24 }}>
+          <div style={{ fontSize:36 }}>🔐</div>
+          <h2 style={{ fontSize:22,fontWeight:700,color:"#0f172a",margin:"8px 0 4px" }}>Staff Login</h2>
+          <p style={{ color:"#64748b",fontSize:13,margin:"0 0 6px" }}>{school.name}</p>
+          <Badge text={`${licInfo?.type?.toUpperCase()} LICENCE`} color={licInfo?.type==="trial"?"#92400e":"#166534"} bg={licInfo?.type==="trial"?"#fef3c7":"#dcfce7"}/>
+        </div>
+        <Row label="Select Your Name">
+          <select value={selUser} onChange={e=>setSelUser(e.target.value)} style={inp}>
+            <option value="">-- Select name --</option>
+            {users.filter(u=>u.active).map(u=><option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+          </select>
+        </Row>
+        <Row label="PIN">
+          <input type="password" value={pin} onChange={e=>setPin(e.target.value)} placeholder="4-digit PIN"
+            style={inp} onKeyDown={e=>e.key==="Enter"&&doLogin()} maxLength={4}/>
+        </Row>
+        {authErr&&<p style={{ color:"#dc2626",fontSize:13,marginBottom:10 }}>{authErr}</p>}
+        <button onClick={doLogin} style={{ ...btnP,width:"100%",padding:12,fontSize:15 }}>Login</button>
+        <p style={{ textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:10 }}>EduSmart v5.0 | {school.name}</p>
+      </div>
+    </div>
+  );
 
+  // ─── ALERTS ───────────────────────────────────────────────
+  const access = ROLE_ACCESS[curUser?.role]||[];
+  const activeStudents = students.filter(s=>s.status==="active");
+
+  // 3+ consecutive absences
+  const absentAlerts = activeStudents.filter(s=>{
+    const sAtt = attendance.filter(a=>a.studentId===s.id).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3);
+    return sAtt.length>=3 && sAtt.every(a=>a.status==="Absent");
+  });
+  const feeAlerts   = activeStudents.filter(s=>s.fees-s.paid>0);
+  const overdueBooks= borrows.filter(b=>!b.returnDate&&b.dueDate<todayStr());
+  const noStock     = books.filter(b=>b.available===0);
+
+  // ─── NAV ─────────────────────────────────────────────────
   const navItems = [
-    { key:"dashboard",   label:"Dashboard",     icon:"📊" },
-    { key:"students",    label:"Students",       icon:"🎒" },
-    { key:"staff",       label:"Staff",          icon:"👥" },
-    { key:"grades",      label:"Grades",         icon:"📝" },
-    { key:"attendance",  label:"Attendance",      icon:"✅" },
-    { key:"finance",     label:"Finance",         icon:"💰" },
-    { key:"library",     label:"Library",         icon:"📚" },
-    { key:"timetable",   label:"Timetable",       icon:"📅" },
-    { key:"reports",     label:"Reports",         icon:"📋" },
-    { key:"idcards",     label:"ID Cards",        icon:"🪪" },
-    { key:"archive",     label:"Archive",         icon:"🗄️" },
-    { key:"audit",       label:"Audit Log",       icon:"🔍" },
-    { key:"settings",    label:"Settings",        icon:"⚙️" },
+    { key:"dashboard",     label:"Dashboard",     icon:"📊" },
+    { key:"students",      label:"Students",       icon:"🎒" },
+    { key:"nursery",       label:"Nursery/KG",     icon:"🍼" },
+    { key:"staff",         label:"Staff",          icon:"👥" },
+    { key:"grades",        label:"Grades",         icon:"📝" },
+    { key:"exams",         label:"Exams",          icon:"📖" },
+    { key:"attendance",    label:"Attendance",     icon:"✅" },
+    { key:"finance",       label:"Finance",        icon:"💰" },
+    { key:"payroll",       label:"Payroll",        icon:"💼" },
+    { key:"library",       label:"Library",        icon:"📚" },
+    { key:"timetable",     label:"Timetable",      icon:"📅" },
+    { key:"communication", label:"Communication",  icon:"💬" },
+    { key:"reports",       label:"Reports",        icon:"📋" },
+    { key:"idcards",       label:"ID Cards",       icon:"🪪" },
+    { key:"archive",       label:"Archive",        icon:"🗄️" },
+    { key:"audit",         label:"Audit Log",      icon:"🔍" },
+    { key:"settings",      label:"Settings",       icon:"⚙️" },
   ].filter(n=>access.includes(n.key));
 
+  const alertCount = absentAlerts.length + overdueBooks.length;
+
+  const sharedProps = { school,students,setStudents,users,setUsers,grades,setGrades,mockExams,setMockExams,
+    attendance,setAttendance,fees,setFees,expenses,setExpenses,payroll,setPayroll,books,setBooks,borrows,setBorrows,
+    nurseryLogs,setNurseryLogs,milestones,setMilestones,examSchedule,setExamSchedule,timetables,setTimetables,
+    auditLog,setAuditLog,curUser,notify,addAudit,absentAlerts,feeAlerts,overdueBooks,noStock,unlockUser,failedLogins,
+    setSchool,licInfo };
+
   return (
-    <div style={{ display:"flex", minHeight:"100vh", fontFamily:"'Segoe UI',sans-serif", background:"#f1f5f9" }}>
+    <div style={{ display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',sans-serif",background:"#f1f5f9" }}>
       {/* SIDEBAR */}
-      <div style={{ width:220, background:"#0f172a", display:"flex", flexDirection:"column", position:"sticky", top:0, height:"100vh", overflowY:"auto" }}>
-        <div style={{ padding:"20px 16px 12px", borderBottom:"1px solid #1e293b" }}>
-          <div style={{ fontSize:22, fontWeight:700, color:"#fff", marginBottom:2 }}>🏫 EduSmart</div>
-          <div style={{ fontSize:11, color:"#94a3b8" }}>{school.name}</div>
-          <div style={{ fontSize:11, color:"#94a3b8" }}>{school.currentTerm} · {school.currentYear}</div>
+      <div style={{ width:210,background:"#0f172a",display:"flex",flexDirection:"column",position:"sticky",top:0,height:"100vh",overflowY:"auto",flexShrink:0 }}>
+        <div style={{ padding:"18px 14px 12px",borderBottom:"1px solid #1e293b" }}>
+          <div style={{ fontSize:20,fontWeight:700,color:"#fff" }}>🏫 EduSmart</div>
+          <div style={{ fontSize:11,color:"#64748b",marginTop:2 }}>{school.name}</div>
+          <div style={{ fontSize:11,color:"#475569" }}>{school.currentTerm} · {school.currentYear}</div>
         </div>
-        <div style={{ padding:"10px 0", flex:1 }}>
+        <div style={{ padding:"8px 0",flex:1 }}>
           {navItems.map(n=>(
-            <button key={n.key} onClick={()=>setActiveSection(n.key)}
-              style={{ display:"block", width:"100%", textAlign:"left", padding:"10px 18px", background:activeSection===n.key?"#1e40af":"transparent",
-                color:activeSection===n.key?"#fff":"#94a3b8", border:"none", cursor:"pointer", fontSize:13.5, fontWeight:activeSection===n.key?600:400 }}>
+            <button key={n.key} onClick={()=>setSection(n.key)}
+              style={{ display:"block",width:"100%",textAlign:"left",padding:"9px 16px",
+                background:section===n.key?"#1e40af":"transparent",
+                color:section===n.key?"#fff":"#94a3b8",border:"none",cursor:"pointer",fontSize:13,
+                fontWeight:section===n.key?600:400 }}>
               {n.icon} {n.label}
+              {n.key==="dashboard"&&alertCount>0&&<span style={{ float:"right",background:"#dc2626",color:"#fff",borderRadius:10,padding:"1px 6px",fontSize:10 }}>{alertCount}</span>}
             </button>
           ))}
         </div>
-        <div style={{ padding:14, borderTop:"1px solid #1e293b" }}>
-          <div style={{ fontSize:12, color:"#94a3b8", marginBottom:4 }}>{currentUser?.name}</div>
-          <div style={{ fontSize:11, color:"#475569", marginBottom:8 }}>{currentUser?.role} · {currentUser?.code}</div>
-          <span style={{ background:"#1e293b", color:"#94a3b8", fontSize:10, padding:"2px 8px", borderRadius:10, marginRight:4 }}>
-            {licenceInfo?.type?.toUpperCase()}
-          </span>
-          <button onClick={()=>{setLoggedIn(false);setCurrentUser(null);setPinInput("");setSelectedUserId("");}}
-            style={{ marginTop:8, width:"100%", padding:"7px", background:"#7f1d1d", color:"#fca5a5", border:"none", borderRadius:6, cursor:"pointer", fontSize:12 }}>
-            Logout
-          </button>
+        <div style={{ padding:12,borderTop:"1px solid #1e293b" }}>
+          <div style={{ fontSize:12,color:"#94a3b8",marginBottom:2 }}>{curUser?.name}</div>
+          <div style={{ fontSize:11,color:"#475569",marginBottom:6 }}>{curUser?.role} · {curUser?.code}</div>
+          <button onClick={doLogout} style={{ width:"100%",padding:7,background:"#7f1d1d",color:"#fca5a5",border:"none",borderRadius:6,cursor:"pointer",fontSize:12 }}>Logout</button>
         </div>
       </div>
 
-      {/* MAIN CONTENT */}
-      <div style={{ flex:1, overflow:"auto" }}>
-        {notification && (
-          <div style={{ position:"fixed", top:16, right:16, zIndex:9999, padding:"12px 20px", borderRadius:10,
-            background:notification.type==="success"?"#16a34a":"#dc2626", color:"#fff", fontSize:13, boxShadow:"0 4px 12px rgba(0,0,0,0.3)" }}>
-            {notification.msg}
-          </div>
-        )}
+      {/* MAIN */}
+      <div style={{ flex:1,overflow:"auto" }}>
+        {notif&&<div style={{ position:"fixed",top:16,right:16,zIndex:9999,padding:"12px 20px",borderRadius:10,
+          background:notif.type==="success"?"#16a34a":"#dc2626",color:"#fff",fontSize:13,boxShadow:"0 4px 12px rgba(0,0,0,0.3)" }}>{notif.msg}</div>}
         <div style={{ padding:24 }}>
-          {activeSection==="dashboard"   && <Dashboard school={school} students={students} fees={fees} expenses={expenses} attendance={attendance} grades={grades} books={books} borrows={borrows} users={users} currentUser={currentUser}/>}
-          {activeSection==="students"    && <Students students={students} setStudents={setStudents} classes={CLASSES} notify={notify} addAudit={addAudit}/>}
-          {activeSection==="staff"       && <Staff users={users} setUsers={setUsers} roles={ROLES} classes={CLASSES} notify={notify} addAudit={addAudit}/>}
-          {activeSection==="grades"      && <Grades grades={grades} setGrades={setGrades} students={students} subjects={SUBJECTS} currentUser={currentUser} classes={CLASSES} notify={notify} addAudit={addAudit}/>}
-          {activeSection==="attendance"  && <Attendance attendance={attendance} setAttendance={setAttendance} students={students} currentUser={currentUser} classes={CLASSES} notify={notify} addAudit={addAudit}/>}
-          {activeSection==="finance"     && <Finance fees={fees} setFees={setFees} expenses={expenses} setExpenses={setExpenses} students={students} school={school} currentUser={currentUser} notify={notify} addAudit={addAudit}/>}
-          {activeSection==="library"     && <Library books={books} setBooks={setBooks} borrows={borrows} setBorrows={setBorrows} students={students} users={users} currentUser={currentUser} notify={notify} addAudit={addAudit}/>}
-          {activeSection==="timetable"   && <Timetable timetables={TIMETABLES} currentUser={currentUser} classes={CLASSES}/>}
-          {activeSection==="reports"     && <Reports students={students} grades={grades} attendance={attendance} fees={fees} expenses={expenses} classes={CLASSES} subjects={SUBJECTS} school={school}/>}
-          {activeSection==="idcards"     && <IDCards students={students} users={users} school={school}/>}
-          {activeSection==="archive"     && <Archive students={students} setStudents={setStudents} users={users} setUsers={setUsers} notify={notify} addAudit={addAudit}/>}
-          {activeSection==="audit"       && <AuditLog auditLog={auditLog} users={users}/>}
-          {activeSection==="settings"    && <Settings school={school} setSchool={setSchool} users={users} setUsers={setUsers} notify={notify} addAudit={addAudit}/>}
+          {section==="dashboard"    && <Dashboard    {...sharedProps}/>}
+          {section==="students"     && <Students     {...sharedProps}/>}
+          {section==="nursery"      && <Nursery      {...sharedProps}/>}
+          {section==="staff"        && <Staff        {...sharedProps}/>}
+          {section==="grades"       && <Grades       {...sharedProps}/>}
+          {section==="exams"        && <Exams        {...sharedProps}/>}
+          {section==="attendance"   && <Attendance   {...sharedProps}/>}
+          {section==="finance"      && <Finance      {...sharedProps}/>}
+          {section==="payroll"      && <Payroll      {...sharedProps}/>}
+          {section==="library"      && <Library      {...sharedProps}/>}
+          {section==="timetable"    && <Timetable    {...sharedProps}/>}
+          {section==="communication"&& <Communication {...sharedProps}/>}
+          {section==="reports"      && <Reports      {...sharedProps}/>}
+          {section==="idcards"      && <IDCards      {...sharedProps}/>}
+          {section==="archive"      && <Archive      {...sharedProps}/>}
+          {section==="audit"        && <AuditLog     {...sharedProps}/>}
+          {section==="settings"     && <Settings     {...sharedProps}/>}
         </div>
       </div>
     </div>
   );
 }
 
-// ============================================================
-// DASHBOARD
-// ============================================================
-function Dashboard({ school, students, fees, expenses, attendance, grades, books, borrows, users, currentUser }) {
-  const activeStudents = students.filter(s=>s.status==="active");
-  const totalFees   = fees.reduce((a,f)=>a+f.amount,0);
-  const totalPaid   = fees.reduce((a,f)=>a+f.paid,0);
-  const totalExp    = expenses.reduce((a,e)=>a+e.amount,0);
-  const todayAtt    = attendance.filter(a=>a.date===today());
-  const presentToday = todayAtt.filter(a=>a.status==="Present").length;
-  const overdueBooks = borrows.filter(b=>!b.returnDate && b.dueDate < today()).length;
-  const activeTeachers = users.filter(u=>u.role==="Teacher"&&u.active).length;
-  const stats = [
-    { label:"Total Students", value:activeStudents.length, icon:"🎒", color:"#3b82f6" },
-    { label:"Staff Members",  value:users.filter(u=>u.active).length, icon:"👥", color:"#8b5cf6" },
-    { label:"Total Fees Due", value:formatGHS(totalFees), icon:"💰", color:"#10b981" },
-    { label:"Fees Collected", value:formatGHS(totalPaid), icon:"✅", color:"#059669" },
-    { label:"Total Expenses", value:formatGHS(totalExp), icon:"📤", color:"#f59e0b" },
-    { label:"Net Balance",    value:formatGHS(totalPaid-totalExp), icon:"🏦", color: (totalPaid-totalExp)>=0?"#16a34a":"#dc2626" },
-    { label:"Present Today",  value:`${presentToday} / ${activeStudents.length}`, icon:"✅", color:"#0ea5e9" },
-    { label:"Overdue Books",  value:overdueBooks, icon:"📚", color:"#ef4444" },
-  ];
+// ─── DASHBOARD ───────────────────────────────────────────────
+function Dashboard({ school,students,fees,expenses,attendance,grades,books,borrows,users,curUser,absentAlerts,feeAlerts,overdueBooks,noStock,payroll }) {
+  const active = students.filter(s=>s.status==="active");
+  const totalPaid = fees.reduce((a,f)=>a+f.paid,0);
+  const totalExp  = expenses.reduce((a,e)=>a+e.amount,0);
+  const todayAtt  = attendance.filter(a=>a.date===todayStr());
+  const present   = todayAtt.filter(a=>a.status==="Present").length;
+  const classPerf = {};
+  grades.forEach(g=>{ const s=students.find(x=>x.id===g.studentId); if(s){ if(!classPerf[s.class])classPerf[s.class]=[]; classPerf[s.class].push(g.score); }});
+  const bestClass = Object.entries(classPerf).sort((a,b)=>{ const av=arr=>arr.reduce((x,y)=>x+y,0)/arr.length; return av(b[1])-av(a[1]); })[0];
+
   return (
     <div>
       <div style={{ marginBottom:20 }}>
-        <h2 style={{ fontSize:22, fontWeight:700, color:"#0f172a", margin:0 }}>Welcome, {currentUser?.name}</h2>
-        <p style={{ color:"#64748b", margin:"4px 0 0", fontSize:13 }}>{school.name} · {school.currentTerm} {school.currentYear}</p>
+        <h2 style={{ fontSize:22,fontWeight:700,color:"#0f172a",margin:0 }}>Good day, {curUser?.name.split(" ")[0]} 👋</h2>
+        <p style={{ color:"#64748b",margin:"4px 0 0",fontSize:13 }}>{school.name} · {school.currentTerm} {school.currentYear}</p>
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))", gap:14, marginBottom:24 }}>
-        {stats.map((s,i)=>(
-          <div key={i} style={{ background:"#fff", borderRadius:12, padding:18, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", borderLeft:`4px solid ${s.color}` }}>
-            <div style={{ fontSize:22, marginBottom:6 }}>{s.icon}</div>
-            <div style={{ fontSize:20, fontWeight:700, color:s.color }}>{s.value}</div>
-            <div style={{ fontSize:12, color:"#64748b" }}>{s.label}</div>
-          </div>
-        ))}
-      </div>
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-        <div style={{ background:"#fff", borderRadius:12, padding:18, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-          <h3 style={{ margin:"0 0 12px", fontSize:15, color:"#0f172a" }}>Fee Arrears — Top Students</h3>
-          {students.filter(s=>s.status==="active"&&s.fees-s.paid>0).slice(0,5).map(s=>(
-            <div key={s.id} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid #f1f5f9", fontSize:13 }}>
-              <span>{s.name} ({s.class})</span>
-              <span style={{ color:"#dc2626", fontWeight:600 }}>{formatGHS(s.fees-s.paid)}</span>
+
+      {/* ALERTS */}
+      {(absentAlerts.length>0||overdueBooks.length>0||noStock.length>0)&&(
+        <div style={{ marginBottom:20 }}>
+          {absentAlerts.map(s=>(
+            <div key={s.id} style={{ background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,padding:"10px 16px",marginBottom:8,fontSize:13,color:"#9a3412" }}>
+              ⚠️ <strong>{s.name}</strong> ({s.class}) has been absent 3+ consecutive days
             </div>
           ))}
-          {students.filter(s=>s.status==="active"&&s.fees-s.paid>0).length===0 && <p style={{ color:"#10b981", fontSize:13 }}>All fees cleared! ✅</p>}
+          {overdueBooks.map(b=>{ const bk=books?.find(x=>x.id===b.bookId); return (
+            <div key={b.id} style={{ background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:"10px 16px",marginBottom:8,fontSize:13,color:"#991b1b" }}>
+              📚 Overdue: <strong>{bk?.title}</strong> — due {b.dueDate}
+            </div>
+          );})}
+          {noStock.map(b=>(
+            <div key={b.id} style={{ background:"#fef9c3",border:"1px solid #fde047",borderRadius:10,padding:"10px 16px",marginBottom:8,fontSize:13,color:"#713f12" }}>
+              📦 Out of stock: <strong>{b.title}</strong> (0 copies available)
+            </div>
+          ))}
         </div>
-        <div style={{ background:"#fff", borderRadius:12, padding:18, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-          <h3 style={{ margin:"0 0 12px", fontSize:15, color:"#0f172a" }}>Recent Grade Entries</h3>
-          {grades.slice(-5).reverse().map(g=>{
-            const stu = students.find(s=>s.id===g.studentId);
+      )}
+
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:12,marginBottom:24 }}>
+        <StatCard icon="🎒" label="Active Students"  value={active.length}              color="#3b82f6"/>
+        <StatCard icon="👥" label="Active Staff"     value={users.filter(u=>u.active).length} color="#8b5cf6"/>
+        <StatCard icon="💰" label="Fees Collected"   value={formatGHS(totalPaid)}        color="#10b981"/>
+        <StatCard icon="📤" label="Total Expenses"   value={formatGHS(totalExp)}          color="#f59e0b"/>
+        <StatCard icon="🏦" label="Net Balance"      value={formatGHS(totalPaid-totalExp)} color={(totalPaid-totalExp)>=0?"#0369a1":"#dc2626"}/>
+        <StatCard icon="✅" label="Present Today"    value={`${present}/${active.length}`} color="#0ea5e9"/>
+        <StatCard icon="⚠️" label="Fee Arrears"      value={feeAlerts.length}             color="#ef4444" sub="students with balance"/>
+        <StatCard icon="📚" label="Overdue Books"    value={overdueBooks.length}          color="#dc2626"/>
+      </div>
+
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16 }}>
+        <Card style={{ padding:18 }}>
+          <h3 style={{ margin:"0 0 12px",fontSize:15,color:"#0f172a" }}>📊 Class Performance</h3>
+          {Object.entries(classPerf).slice(0,6).map(([cls,scores])=>{
+            const avg=Math.round(scores.reduce((a,b)=>a+b,0)/scores.length);
             return (
-              <div key={g.id} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid #f1f5f9", fontSize:13 }}>
-                <span>{stu?.name||g.studentId} — {g.subject}</span>
-                <span style={{ fontWeight:600, color:g.grade==="A"?"#16a34a":g.grade==="F"?"#dc2626":"#f59e0b" }}>{g.grade} ({g.score})</span>
+              <div key={cls} style={{ marginBottom:8 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3 }}>
+                  <span>{cls}</span><span style={{ fontWeight:600,color:avg>=70?"#16a34a":avg>=50?"#d97706":"#dc2626" }}>{avg}%</span>
+                </div>
+                <div style={{ height:6,background:"#f1f5f9",borderRadius:4 }}>
+                  <div style={{ height:6,borderRadius:4,background:avg>=70?"#16a34a":avg>=50?"#f59e0b":"#dc2626",width:`${avg}%` }}/>
+                </div>
               </div>
             );
           })}
-        </div>
+          {bestClass&&<p style={{ margin:"10px 0 0",fontSize:12,color:"#0369a1" }}>🏆 Best: <strong>{bestClass[0]}</strong> ({Math.round(bestClass[1].reduce((a,b)=>a+b,0)/bestClass[1].length)}% avg)</p>}
+        </Card>
+        <Card style={{ padding:18 }}>
+          <h3 style={{ margin:"0 0 12px",fontSize:15,color:"#0f172a" }}>💸 Fee Arrears</h3>
+          {feeAlerts.slice(0,6).map(s=>(
+            <div key={s.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f1f5f9",fontSize:13 }}>
+              <span>{s.name} <span style={{ color:"#9ca3af",fontSize:11 }}>({s.class})</span></span>
+              <span style={{ color:"#dc2626",fontWeight:600 }}>{formatGHS(s.fees-s.paid)}</span>
+            </div>
+          ))}
+          {feeAlerts.length===0&&<p style={{ color:"#16a34a",fontSize:13 }}>✅ All fees cleared!</p>}
+        </Card>
       </div>
     </div>
   );
 }
 
-// ============================================================
-// STUDENTS
-// ============================================================
-function Students({ students, setStudents, classes, notify, addAudit }) {
-  const [search, setSearch]   = useState("");
-  const [filterClass, setFilterClass] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [editId, setEditId]   = useState(null);
-  const [form, setForm]       = useState({ name:"", class:"", dob:"", gender:"Male", guardian:"", phone:"", fees:500, paid:0, status:"active" });
+// ─── STUDENTS ────────────────────────────────────────────────
+function Students({ students,setStudents,notify,addAudit,curUser }) {
+  const [search,setSearch]=useState(""); const [fc,setFc]=useState(""); const [fs,setFs]=useState("all");
+  const [showForm,setShowForm]=useState(false); const [editId,setEditId]=useState(null);
+  const blank = { name:"",class:"Class 1A",dob:"",gender:"Male",guardian:"",phone:"",fees:500,paid:0,status:"active",section:"primary" };
+  const [form,setForm]=useState(blank);
 
-  const filtered = students.filter(s=>s.status==="active" && (s.name.toLowerCase().includes(search.toLowerCase())||s.id.includes(search)) && (!filterClass||s.class===filterClass));
-
-  const save = () => {
-    if (!form.name||!form.class) { notify("Name and Class are required","error"); return; }
-    if (editId) {
-      setStudents(prev=>prev.map(s=>s.id===editId?{...s,...form}:s));
-      addAudit(`Edited student: ${form.name}`,"Students"); notify("Student updated");
-    } else {
-      const newS = { ...form, id: uid("STU") };
-      setStudents(prev=>[...prev, newS]);
-      addAudit(`Added student: ${form.name}`,"Students"); notify("Student added");
-    }
-    setShowForm(false); setEditId(null); setForm({ name:"", class:"", dob:"", gender:"Male", guardian:"", phone:"", fees:500, paid:0, status:"active" });
-  };
-
-  return (
-    <div>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-        <h2 style={{ margin:0, fontSize:20, fontWeight:700, color:"#0f172a" }}>🎒 Students</h2>
-        <button onClick={()=>{setShowForm(true);setEditId(null);setForm({ name:"", class:"", dob:"", gender:"Male", guardian:"", phone:"", fees:500, paid:0, status:"active" });}}
-          style={{ padding:"8px 18px", background:"#1e40af", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontWeight:600 }}>
-          + Add Student
-        </button>
-      </div>
-      <div style={{ display:"flex", gap:10, marginBottom:14 }}>
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name or ID..."
-          style={{ flex:1, padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}/>
-        <select value={filterClass} onChange={e=>setFilterClass(e.target.value)}
-          style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}>
-          <option value="">All Classes</option>
-          {classes.map(c=><option key={c} value={c}>{c}</option>)}
-        </select>
-      </div>
-      {showForm && (
-        <FormModal title={editId?"Edit Student":"Add Student"} onClose={()=>{setShowForm(false);setEditId(null);}}>
-          <FormRow label="Full Name"><input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} style={inp}/></FormRow>
-          <FormRow label="Class">
-            <select value={form.class} onChange={e=>setForm(p=>({...p,class:e.target.value}))} style={inp}>
-              <option value="">Select</option>
-              {classes.map(c=><option key={c} value={c}>{c}</option>)}
-            </select>
-          </FormRow>
-          <FormRow label="Date of Birth"><input type="date" value={form.dob} onChange={e=>setForm(p=>({...p,dob:e.target.value}))} style={inp}/></FormRow>
-          <FormRow label="Gender">
-            <select value={form.gender} onChange={e=>setForm(p=>({...p,gender:e.target.value}))} style={inp}>
-              <option>Male</option><option>Female</option>
-            </select>
-          </FormRow>
-          <FormRow label="Guardian Name"><input value={form.guardian} onChange={e=>setForm(p=>({...p,guardian:e.target.value}))} style={inp}/></FormRow>
-          <FormRow label="Guardian Phone"><input value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))} style={inp}/></FormRow>
-          <FormRow label="Fees (GH₵)"><input type="number" value={form.fees} onChange={e=>setForm(p=>({...p,fees:+e.target.value}))} style={inp}/></FormRow>
-          <FormRow label="Amount Paid (GH₵)"><input type="number" value={form.paid} onChange={e=>setForm(p=>({...p,paid:+e.target.value}))} style={inp}/></FormRow>
-          <div style={{ display:"flex", justifyContent:"flex-end", gap:10, marginTop:16 }}>
-            <button onClick={()=>{setShowForm(false);setEditId(null);}} style={btnSecondary}>Cancel</button>
-            <button onClick={save} style={btnPrimary}>Save</button>
-          </div>
-        </FormModal>
-      )}
-      <div style={{ background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-          <thead><tr style={{ background:"#f8fafc" }}>
-            {["ID","Name","Class","Gender","Guardian","Phone","Fees","Paid","Balance","Actions"].map(h=>(
-              <th key={h} style={{ padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#374151", borderBottom:"1px solid #e5e7eb" }}>{h}</th>
-            ))}
-          </tr></thead>
-          <tbody>
-            {filtered.map(s=>(
-              <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
-                <td style={{ padding:"8px 12px", color:"#6b7280" }}>{s.id}</td>
-                <td style={{ padding:"8px 12px", fontWeight:600, color:"#0f172a" }}>{s.name}</td>
-                <td style={{ padding:"8px 12px" }}>{s.class}</td>
-                <td style={{ padding:"8px 12px" }}>{s.gender}</td>
-                <td style={{ padding:"8px 12px" }}>{s.guardian}</td>
-                <td style={{ padding:"8px 12px" }}>{s.phone}</td>
-                <td style={{ padding:"8px 12px" }}>{formatGHS(s.fees)}</td>
-                <td style={{ padding:"8px 12px", color:"#16a34a" }}>{formatGHS(s.paid)}</td>
-                <td style={{ padding:"8px 12px", color:s.fees-s.paid>0?"#dc2626":"#16a34a", fontWeight:600 }}>{formatGHS(s.fees-s.paid)}</td>
-                <td style={{ padding:"8px 12px" }}>
-                  <button onClick={()=>{setEditId(s.id);setForm({name:s.name,class:s.class,dob:s.dob,gender:s.gender,guardian:s.guardian,phone:s.phone,fees:s.fees,paid:s.paid,status:s.status});setShowForm(true);}}
-                    style={{ ...btnSmall, background:"#dbeafe", color:"#1d4ed8", marginRight:4 }}>Edit</button>
-                  <button onClick={()=>{
-                    if(confirm(`Mark ${s.name} as dropout?`)){
-                      setStudents(prev=>prev.map(x=>x.id===s.id?{...x,status:"dropout"}:x));
-                      addAudit(`Marked dropout: ${s.name}`,"Students"); notify("Moved to archive");
-                    }
-                  }} style={{ ...btnSmall, background:"#fee2e2", color:"#991b1b" }}>Dropout</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {filtered.length===0 && <p style={{ textAlign:"center", color:"#9ca3af", padding:20 }}>No students found.</p>}
-      </div>
-      <p style={{ fontSize:12, color:"#94a3b8", marginTop:8 }}>Showing {filtered.length} active students</p>
-    </div>
-  );
-}
-
-// ============================================================
-// STAFF
-// ============================================================
-function Staff({ users, setUsers, roles, classes, notify, addAudit }) {
-  const [showForm, setShowForm] = useState(false);
-  const [editId, setEditId]     = useState(null);
-  const [form, setForm]         = useState({ name:"", role:"Teacher", pin:"", code:"", email:"", classAssigned:"", active:true });
-  const [filterRole, setFilterRole] = useState("");
-
-  const filtered = users.filter(u=>!filterRole||u.role===filterRole);
-
-  const save = () => {
-    if (!form.name||!form.pin||!form.code) { notify("Name, PIN and Code required","error"); return; }
-    if (editId) {
-      setUsers(prev=>prev.map(u=>u.id===editId?{...u,...form}:u));
-      addAudit(`Edited staff: ${form.name}`,"Staff"); notify("Staff updated");
-    } else {
-      setUsers(prev=>[...prev,{...form,id:uid("USR")}]);
-      addAudit(`Added staff: ${form.name}`,"Staff"); notify("Staff added");
-    }
-    setShowForm(false); setEditId(null);
-    setForm({ name:"", role:"Teacher", pin:"", code:"", email:"", classAssigned:"", active:true });
-  };
-
-  const roleColors = { Admin:"#7c3aed", Headmaster:"#1d4ed8", HOD:"#0369a1", Teacher:"#059669", "Account Office":"#d97706", Librarian:"#6d28d9", "Non-Teaching Staff":"#6b7280" };
-
-  return (
-    <div>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-        <h2 style={{ margin:0, fontSize:20, fontWeight:700, color:"#0f172a" }}>👥 Staff Management</h2>
-        <button onClick={()=>{setShowForm(true);setEditId(null);setForm({ name:"", role:"Teacher", pin:"", code:"", email:"", classAssigned:"", active:true });}}
-          style={btnPrimary}>+ Add Staff</button>
-      </div>
-      <div style={{ marginBottom:14 }}>
-        <select value={filterRole} onChange={e=>setFilterRole(e.target.value)} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}>
-          <option value="">All Roles</option>
-          {roles.map(r=><option key={r}>{r}</option>)}
-        </select>
-      </div>
-      {showForm && (
-        <FormModal title={editId?"Edit Staff":"Add Staff"} onClose={()=>{setShowForm(false);setEditId(null);}}>
-          <FormRow label="Full Name"><input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} style={inp}/></FormRow>
-          <FormRow label="Role">
-            <select value={form.role} onChange={e=>setForm(p=>({...p,role:e.target.value}))} style={inp}>
-              {roles.map(r=><option key={r}>{r}</option>)}
-            </select>
-          </FormRow>
-          <FormRow label="Staff Code"><input value={form.code} onChange={e=>setForm(p=>({...p,code:e.target.value.toUpperCase()}))} placeholder="e.g. TCH003" style={inp}/></FormRow>
-          <FormRow label="PIN (4 digits)"><input type="password" value={form.pin} onChange={e=>setForm(p=>({...p,pin:e.target.value}))} maxLength={4} style={inp}/></FormRow>
-          <FormRow label="Email"><input value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))} style={inp}/></FormRow>
-          {form.role==="Teacher"&&(
-            <FormRow label="Class Assigned">
-              <select value={form.classAssigned||""} onChange={e=>setForm(p=>({...p,classAssigned:e.target.value}))} style={inp}>
-                <option value="">None</option>
-                {classes.map(c=><option key={c}>{c}</option>)}
-              </select>
-            </FormRow>
-          )}
-          <FormRow label="Active">
-            <select value={form.active?"yes":"no"} onChange={e=>setForm(p=>({...p,active:e.target.value==="yes"}))} style={inp}>
-              <option value="yes">Yes</option><option value="no">No</option>
-            </select>
-          </FormRow>
-          <div style={{ display:"flex", justifyContent:"flex-end", gap:10, marginTop:16 }}>
-            <button onClick={()=>{setShowForm(false);setEditId(null);}} style={btnSecondary}>Cancel</button>
-            <button onClick={save} style={btnPrimary}>Save</button>
-          </div>
-        </FormModal>
-      )}
-      <div style={{ background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-          <thead><tr style={{ background:"#f8fafc" }}>
-            {["ID","Code","Name","Role","Class","Email","Status","Actions"].map(h=>(
-              <th key={h} style={{ padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#374151", borderBottom:"1px solid #e5e7eb" }}>{h}</th>
-            ))}
-          </tr></thead>
-          <tbody>
-            {filtered.map(u=>(
-              <tr key={u.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
-                <td style={{ padding:"8px 12px", color:"#6b7280" }}>{u.id}</td>
-                <td style={{ padding:"8px 12px", fontWeight:700, color:"#1e40af" }}>{u.code}</td>
-                <td style={{ padding:"8px 12px", fontWeight:600 }}>{u.name}</td>
-                <td style={{ padding:"8px 12px" }}>
-                  <span style={{ background: (roleColors[u.role]||"#6b7280")+"22", color:roleColors[u.role]||"#6b7280", padding:"2px 8px", borderRadius:10, fontSize:11, fontWeight:600 }}>{u.role}</span>
-                </td>
-                <td style={{ padding:"8px 12px", color:"#6b7280" }}>{u.classAssigned||"—"}</td>
-                <td style={{ padding:"8px 12px", color:"#6b7280" }}>{u.email}</td>
-                <td style={{ padding:"8px 12px" }}>
-                  <span style={{ background:u.active?"#dcfce7":"#fee2e2", color:u.active?"#166534":"#991b1b", padding:"2px 8px", borderRadius:10, fontSize:11 }}>{u.active?"Active":"Inactive"}</span>
-                </td>
-                <td style={{ padding:"8px 12px" }}>
-                  <button onClick={()=>{setEditId(u.id);setForm({name:u.name,role:u.role,pin:u.pin,code:u.code,email:u.email,classAssigned:u.classAssigned||"",active:u.active});setShowForm(true);}}
-                    style={{ ...btnSmall, background:"#dbeafe", color:"#1d4ed8" }}>Edit</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-// GRADES
-// ============================================================
-function Grades({ grades, setGrades, students, subjects, currentUser, classes, notify, addAudit }) {
-  const isTeacher = currentUser?.role==="Teacher";
-  const myClass   = isTeacher ? currentUser?.classAssigned : null;
-  const [form, setForm]   = useState({ studentId:"", subject:"", score:"", term:"Term 2", year:"2024/2025" });
-  const [filterClass, setFilterClass] = useState(myClass||"");
-  const [filterSubject, setFilterSubject] = useState("");
-  const [editId, setEditId] = useState(null);
-  const [showForm, setShowForm] = useState(false);
-
-  const availStudents = students.filter(s=>s.status==="active"&&(!filterClass||s.class===filterClass));
-  const filtered = grades.filter(g=>{
-    const stu = students.find(s=>s.id===g.studentId);
-    return (!filterClass||stu?.class===filterClass) && (!filterSubject||g.subject===filterSubject) && (!isTeacher||stu?.class===myClass);
+  const filtered = students.filter(s=>{
+    const matchSearch = s.name.toLowerCase().includes(search.toLowerCase())||s.id.includes(search);
+    const matchClass  = !fc||s.class===fc;
+    const matchStatus = fs==="all"||s.status===fs;
+    return matchSearch&&matchClass&&matchStatus;
   });
 
   const save = () => {
-    const score = +form.score;
-    if (!form.studentId||!form.subject||isNaN(score)||score<0||score>100) { notify("Please fill all fields correctly","error"); return; }
-    const grade = calcGrade(score);
-    if (editId) {
-      setGrades(prev=>prev.map(g=>g.id===editId?{...g,...form,score,grade,enteredBy:currentUser.code,date:today()}:g));
-      addAudit(`Updated grade for student ${form.studentId}`,"Grades"); notify("Grade updated");
-    } else {
-      setGrades(prev=>[...prev,{id:uid("GRD"),...form,score,grade,enteredBy:currentUser.code,date:today()}]);
-      addAudit(`Entered grade: ${form.subject} for ${form.studentId}`,"Grades"); notify("Grade saved");
-    }
-    setShowForm(false); setEditId(null); setForm({ studentId:"", subject:"", score:"", term:"Term 2", year:"2024/2025" });
+    if(!form.name||!form.class){ notify("Name and Class required","error"); return; }
+    const section = KG_CLASSES.includes(form.class)?"nursery":JHS_CLASSES.includes(form.class)?"jhs":"primary";
+    if(editId){ setStudents(p=>p.map(s=>s.id===editId?{...s,...form,section}:s)); addAudit(`Edited: ${form.name}`,"Students"); notify("Student updated"); }
+    else { setStudents(p=>[...p,{...form,section,id:uid("STU")}]); addAudit(`Added: ${form.name}`,"Students"); notify("Student added"); }
+    setShowForm(false); setEditId(null); setForm(blank);
   };
-
-  const gradeColor = g => g==="A"?"#16a34a":g==="B"?"#0369a1":g==="C"?"#d97706":g==="D"?"#ea580c":g==="E"?"#dc2626":"#7f1d1d";
 
   return (
     <div>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-        <h2 style={{ margin:0, fontSize:20, fontWeight:700, color:"#0f172a" }}>📝 Grades & Assessment</h2>
-        <button onClick={()=>{setShowForm(true);setEditId(null);setForm({ studentId:"", subject:subjects[0], score:"", term:"Term 2", year:"2024/2025" });}} style={btnPrimary}>+ Enter Grade</button>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+        <h2 style={{ margin:0,fontSize:20,fontWeight:700,color:"#0f172a" }}>🎒 Students</h2>
+        <button onClick={()=>{setShowForm(true);setEditId(null);setForm(blank);}} style={btnP}>+ Add Student</button>
       </div>
-      <div style={{ display:"flex", gap:10, marginBottom:14 }}>
-        {!isTeacher&&<select value={filterClass} onChange={e=>setFilterClass(e.target.value)} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}>
+      <div style={{ display:"flex",gap:8,marginBottom:14,flexWrap:"wrap" }}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name/ID..." style={{ ...inp,width:200 }}/>
+        <select value={fc} onChange={e=>setFc(e.target.value)} style={{ ...inp,width:160 }}>
           <option value="">All Classes</option>
-          {classes.map(c=><option key={c}>{c}</option>)}
-        </select>}
-        {isTeacher&&<div style={{ padding:"8px 12px", background:"#dbeafe", borderRadius:8, fontSize:13, color:"#1d4ed8", fontWeight:600 }}>Class: {myClass}</div>}
-        <select value={filterSubject} onChange={e=>setFilterSubject(e.target.value)} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}>
-          <option value="">All Subjects</option>
-          {subjects.map(s=><option key={s}>{s}</option>)}
+          {CLASSES.map(c=><option key={c}>{c}</option>)}
+        </select>
+        <select value={fs} onChange={e=>setFs(e.target.value)} style={{ ...inp,width:140 }}>
+          <option value="all">All Statuses</option>
+          <option value="active">Active</option>
+          <option value="dropout">Dropout</option>
+          <option value="graduated">Graduated</option>
         </select>
       </div>
-      {showForm && (
-        <FormModal title={editId?"Edit Grade":"Enter Grade"} onClose={()=>{setShowForm(false);setEditId(null);}}>
-          <FormRow label="Student">
-            <select value={form.studentId} onChange={e=>setForm(p=>({...p,studentId:e.target.value}))} style={inp}>
-              <option value="">Select student</option>
-              {availStudents.map(s=><option key={s.id} value={s.id}>{s.name} — {s.class}</option>)}
-            </select>
-          </FormRow>
-          <FormRow label="Subject">
-            <select value={form.subject} onChange={e=>setForm(p=>({...p,subject:e.target.value}))} style={inp}>
-              {subjects.map(s=><option key={s}>{s}</option>)}
-            </select>
-          </FormRow>
-          <FormRow label="Score (0-100)"><input type="number" min={0} max={100} value={form.score} onChange={e=>setForm(p=>({...p,score:e.target.value}))} style={inp}/></FormRow>
-          <FormRow label="Term">
-            <select value={form.term} onChange={e=>setForm(p=>({...p,term:e.target.value}))} style={inp}>
-              <option>Term 1</option><option>Term 2</option><option>Term 3</option>
-            </select>
-          </FormRow>
-          <FormRow label="Academic Year"><input value={form.year} onChange={e=>setForm(p=>({...p,year:e.target.value}))} style={inp}/></FormRow>
-          {form.score!=""&&<div style={{ background:"#f0fdf4", borderRadius:8, padding:10, marginTop:8, textAlign:"center" }}>
-            <span style={{ fontSize:24, fontWeight:700, color:gradeColor(calcGrade(+form.score)) }}>{calcGrade(+form.score)}</span>
-            <span style={{ color:"#6b7280", fontSize:13, marginLeft:8 }}>({form.score}/100)</span>
-          </div>}
-          <div style={{ display:"flex", justifyContent:"flex-end", gap:10, marginTop:16 }}>
-            <button onClick={()=>{setShowForm(false);setEditId(null);}} style={btnSecondary}>Cancel</button>
-            <button onClick={save} style={btnPrimary}>Save Grade</button>
+      {showForm&&(
+        <Modal title={editId?"Edit Student":"Add Student"} onClose={()=>{setShowForm(false);setEditId(null);}}>
+          <Row label="Full Name"><input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} style={inp}/></Row>
+          <Row label="Class"><select value={form.class} onChange={e=>setForm(p=>({...p,class:e.target.value}))} style={inp}>{CLASSES.map(c=><option key={c}>{c}</option>)}</select></Row>
+          <Row label="Date of Birth"><input type="date" value={form.dob} onChange={e=>setForm(p=>({...p,dob:e.target.value}))} style={inp}/></Row>
+          <Row label="Gender"><select value={form.gender} onChange={e=>setForm(p=>({...p,gender:e.target.value}))} style={inp}><option>Male</option><option>Female</option></select></Row>
+          <Row label="Guardian Name"><input value={form.guardian} onChange={e=>setForm(p=>({...p,guardian:e.target.value}))} style={inp}/></Row>
+          <Row label="Guardian Phone"><input value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))} style={inp}/></Row>
+          <Row label="Fees (GH₵)"><input type="number" value={form.fees} onChange={e=>setForm(p=>({...p,fees:+e.target.value}))} style={inp}/></Row>
+          <Row label="Amount Paid (GH₵)"><input type="number" value={form.paid} onChange={e=>setForm(p=>({...p,paid:+e.target.value}))} style={inp}/></Row>
+          <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:16 }}>
+            <button onClick={()=>{setShowForm(false);setEditId(null);}} style={btnS}>Cancel</button>
+            <button onClick={save} style={btnP}>Save</button>
           </div>
-        </FormModal>
+        </Modal>
       )}
-      <div style={{ background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-          <thead><tr style={{ background:"#f8fafc" }}>
-            {["Student","Class","Subject","Score","Grade","Term","Year","Entered By","Date","Actions"].map(h=>(
-              <th key={h} style={{ padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#374151", borderBottom:"1px solid #e5e7eb" }}>{h}</th>
-            ))}
-          </tr></thead>
-          <tbody>
-            {filtered.map(g=>{
-              const stu = students.find(s=>s.id===g.studentId);
-              return (
-                <tr key={g.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
-                  <td style={{ padding:"8px 12px", fontWeight:600 }}>{stu?.name||g.studentId}</td>
-                  <td style={{ padding:"8px 12px" }}>{stu?.class}</td>
-                  <td style={{ padding:"8px 12px" }}>{g.subject}</td>
-                  <td style={{ padding:"8px 12px" }}>{g.score}</td>
-                  <td style={{ padding:"8px 12px" }}>
-                    <span style={{ background:gradeColor(g.grade)+"22", color:gradeColor(g.grade), padding:"2px 10px", borderRadius:10, fontWeight:700, fontSize:13 }}>{g.grade}</span>
-                  </td>
-                  <td style={{ padding:"8px 12px" }}>{g.term}</td>
-                  <td style={{ padding:"8px 12px" }}>{g.year}</td>
-                  <td style={{ padding:"8px 12px", color:"#6b7280", fontSize:11 }}>{g.enteredBy}</td>
-                  <td style={{ padding:"8px 12px", color:"#6b7280", fontSize:11 }}>{g.date}</td>
-                  <td style={{ padding:"8px 12px" }}>
-                    <button onClick={()=>{setEditId(g.id);setForm({studentId:g.studentId,subject:g.subject,score:g.score,term:g.term,year:g.year});setShowForm(true);}}
-                      style={{ ...btnSmall, background:"#dbeafe", color:"#1d4ed8" }}>Edit</button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {filtered.length===0&&<p style={{ textAlign:"center", color:"#9ca3af", padding:20 }}>No grades found.</p>}
-      </div>
+      <Table cols={["ID","Name","Class","Gender","Guardian","Phone","Fees","Paid","Balance","Status","Actions"]}
+        rows={filtered.map(s=>(
+          <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+            <TD small color="#6b7280">{s.id}</TD>
+            <TD bold>{s.name}</TD>
+            <TD>{s.class}</TD>
+            <TD>{s.gender}</TD>
+            <TD>{s.guardian}</TD>
+            <TD small>{s.phone}</TD>
+            <TD>{formatGHS(s.fees)}</TD>
+            <TD color="#16a34a" bold>{formatGHS(s.paid)}</TD>
+            <TD color={s.fees-s.paid>0?"#dc2626":"#16a34a"} bold>{formatGHS(s.fees-s.paid)}</TD>
+            <td style={{ padding:"8px 12px" }}>
+              <Badge text={s.status} color={s.status==="active"?"#166534":s.status==="graduated"?"#1d4ed8":"#991b1b"} bg={s.status==="active"?"#dcfce7":s.status==="graduated"?"#dbeafe":"#fee2e2"}/>
+            </td>
+            <td style={{ padding:"8px 12px",display:"flex",gap:4 }}>
+              <button onClick={()=>{setEditId(s.id);setForm({name:s.name,class:s.class,dob:s.dob||"",gender:s.gender,guardian:s.guardian,phone:s.phone,fees:s.fees,paid:s.paid,status:s.status});setShowForm(true);}} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8" }}>Edit</button>
+              {s.status==="active"&&<button onClick={()=>{if(confirm(`Mark ${s.name} as dropout?`)){setStudents(p=>p.map(x=>x.id===s.id?{...x,status:"dropout"}:x));addAudit(`Dropout: ${s.name}`,"Students");notify("Moved to archive");}}} style={{ ...btnSm,background:"#fee2e2",color:"#991b1b" }}>Dropout</button>}
+            </td>
+          </tr>
+        ))} emptyMsg="No students found."/>
+      <p style={{ fontSize:12,color:"#94a3b8",marginTop:8 }}>{filtered.length} records shown</p>
     </div>
   );
 }
 
-// ============================================================
-// ATTENDANCE
-// ============================================================
-function Attendance({ attendance, setAttendance, students, currentUser, classes, notify, addAudit }) {
-  const isTeacher = currentUser?.role==="Teacher";
-  const myClass   = isTeacher ? currentUser?.classAssigned : null;
-  const [date, setDate]           = useState(today());
-  const [selClass, setSelClass]   = useState(myClass||classes[0]);
-  const [view, setView]           = useState("mark"); // mark | history
+// ─── NURSERY / KG ────────────────────────────────────────────
+function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,curUser,notify,addAudit }) {
+  const [tab,setTab]=useState("daily");
+  const [selStu,setSelStu]=useState("");
+  const [selDate,setSelDate]=useState(todayStr());
+  const [selTerm,setSelTerm]=useState("Term 2");
+  const [showLog,setShowLog]=useState(false);
+  const [showMilestone,setShowMilestone]=useState(false);
+  const blank = { napStart:"",napEnd:"",feedingTimes:"",feedingNotes:"",hygiene:"No incidents",mood:"Happy",notes:"" };
+  const [logForm,setLogForm]=useState(blank);
+  const [msForm,setMsForm]=useState({ category:"Motor Skills",milestone:"",rating:"Emerging" });
 
-  const classStudents = students.filter(s=>s.status==="active"&&s.class===selClass);
-  const attForDate    = attendance.filter(a=>a.date===date&&a.class===selClass);
-  const getStatus     = (sid) => attForDate.find(a=>a.studentId===sid)?.status||"Not Marked";
+  const kgStudents = students.filter(s=>s.status==="active"&&KG_CLASSES.includes(s.class));
+  const selStudent  = students.find(s=>s.id===selStu);
+  const stuLogs     = nurseryLogs.filter(l=>l.studentId===selStu).sort((a,b)=>b.date.localeCompare(a.date));
+  const stuMilestones= milestones.filter(m=>m.studentId===selStu);
 
-  const markAll = (status) => {
-    classStudents.forEach(s=>markStudent(s.id,status));
-    notify(`All marked as ${status}`);
+  const saveLog = () => {
+    const existing = nurseryLogs.find(l=>l.studentId===selStu&&l.date===selDate);
+    if(existing){ setNurseryLogs(p=>p.map(l=>l.id===existing.id?{...l,...logForm,enteredBy:curUser.code}:l)); }
+    else { setNurseryLogs(p=>[...p,{id:uid("NRS"),studentId:selStu,date:selDate,...logForm,enteredBy:curUser.code}]); }
+    addAudit(`Daily log: ${selStudent?.name} ${selDate}`,"Nursery"); notify("Log saved"); setShowLog(false); setLogForm(blank);
   };
 
-  const markStudent = (sid, status) => {
-    const existing = attendance.find(a=>a.date===date&&a.class===selClass&&a.studentId===sid);
-    if (existing) {
-      setAttendance(prev=>prev.map(a=>a.id===existing.id?{...a,status,enteredBy:currentUser.code}:a));
-    } else {
-      setAttendance(prev=>[...prev,{id:uid("ATT"),studentId:sid,class:selClass,date,status,enteredBy:currentUser.code}]);
-    }
+  const saveMilestone = () => {
+    if(!msForm.milestone){ notify("Select milestone","error"); return; }
+    const existing = milestones.find(m=>m.studentId===selStu&&m.milestone===msForm.milestone&&m.term===selTerm);
+    if(existing){ setMilestones(p=>p.map(m=>m.id===existing.id?{...m,rating:msForm.rating,enteredBy:curUser.code,date:todayStr()}:m)); }
+    else { setMilestones(p=>[...p,{id:uid("MLS"),studentId:selStu,term:selTerm,year:"2024/2025",...msForm,enteredBy:curUser.code,date:todayStr()}]); }
+    addAudit(`Milestone: ${selStudent?.name}`,"Nursery"); notify("Milestone saved"); setShowMilestone(false);
   };
 
-  const saveAll = () => {
-    addAudit(`Attendance saved for ${selClass} on ${date}`,"Attendance");
-    notify("Attendance saved ✅");
-  };
-
-  const history = attendance.filter(a=>a.class===selClass&&(!isTeacher||a.class===myClass)).sort((a,b)=>b.date.localeCompare(a.date));
+  const ratingColor = r=>r==="Achieved"?"#16a34a":r==="Developing"?"#0369a1":r==="Emerging"?"#d97706":"#9ca3af";
 
   return (
     <div>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-        <h2 style={{ margin:0, fontSize:20, fontWeight:700, color:"#0f172a" }}>✅ Attendance</h2>
-        <div style={{ display:"flex", gap:8 }}>
-          <button onClick={()=>setView("mark")} style={{ ...btnSmall, background:view==="mark"?"#1e40af":"#e5e7eb", color:view==="mark"?"#fff":"#374151", padding:"8px 14px" }}>Mark</button>
-          <button onClick={()=>setView("history")} style={{ ...btnSmall, background:view==="history"?"#1e40af":"#e5e7eb", color:view==="history"?"#fff":"#374151", padding:"8px 14px" }}>History</button>
-        </div>
+      <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>🍼 Nursery & KG</h2>
+      <div style={{ display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center" }}>
+        <select value={selStu} onChange={e=>setSelStu(e.target.value)} style={{ ...inp,width:220 }}>
+          <option value="">Select child</option>
+          {kgStudents.map(s=><option key={s.id} value={s.id}>{s.name} — {s.class}</option>)}
+        </select>
+        <Tabs tabs={[{key:"daily",label:"📋 Daily Log"},{key:"milestones",label:"🌟 Milestones"},{key:"report",label:"📄 KG Report"}]} active={tab} onChange={setTab}/>
       </div>
+
+      {!selStu&&<div style={{ background:"#f0f9ff",borderRadius:12,padding:32,textAlign:"center",color:"#0369a1" }}><div style={{ fontSize:40,marginBottom:8 }}>🍼</div><p>Select a child above to view or enter records</p><p style={{ fontSize:13,color:"#64748b" }}>{kgStudents.length} Nursery/KG children enrolled</p></div>}
+
+      {selStu&&tab==="daily"&&(
+        <div>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+            <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+              <input type="date" value={selDate} onChange={e=>setSelDate(e.target.value)} style={{ ...inp,width:170 }}/>
+            </div>
+            <button onClick={()=>{const e=nurseryLogs.find(l=>l.studentId===selStu&&l.date===selDate);if(e)setLogForm({napStart:e.napStart,napEnd:e.napEnd,feedingTimes:e.feedingTimes,feedingNotes:e.feedingNotes,hygiene:e.hygiene,mood:e.mood,notes:e.notes});else setLogForm(blank);setShowLog(true);}} style={btnP}>+ Add/Edit Log</button>
+          </div>
+          {showLog&&(
+            <Modal title={`Daily Log — ${selStudent?.name} — ${selDate}`} onClose={()=>setShowLog(false)}>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                <Row label="Nap Start"><input type="time" value={logForm.napStart} onChange={e=>setLogForm(p=>({...p,napStart:e.target.value}))} style={inp}/></Row>
+                <Row label="Nap End"><input type="time" value={logForm.napEnd} onChange={e=>setLogForm(p=>({...p,napEnd:e.target.value}))} style={inp}/></Row>
+              </div>
+              <Row label="Feeding Times (e.g. 07:30, 12:00)"><input value={logForm.feedingTimes} onChange={e=>setLogForm(p=>({...p,feedingTimes:e.target.value}))} style={inp}/></Row>
+              <Row label="Feeding Notes"><input value={logForm.feedingNotes} onChange={e=>setLogForm(p=>({...p,feedingNotes:e.target.value}))} style={inp}/></Row>
+              <Row label="Hygiene / Potty"><select value={logForm.hygiene} onChange={e=>setLogForm(p=>({...p,hygiene:e.target.value}))} style={inp}>
+                {["No incidents","1 accident","2+ accidents","Used potty successfully","Needed assistance"].map(o=><option key={o}>{o}</option>)}
+              </select></Row>
+              <Row label="Mood"><select value={logForm.mood} onChange={e=>setLogForm(p=>({...p,mood:e.target.value}))} style={inp}>
+                {["Happy","Calm","Fussy","Crying","Tired","Energetic","Anxious"].map(o=><option key={o}>{o}</option>)}
+              </select></Row>
+              <Row label="Notes"><textarea value={logForm.notes} onChange={e=>setLogForm(p=>({...p,notes:e.target.value}))} style={{ ...inp,height:60,resize:"vertical" }}/></Row>
+              <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:12 }}>
+                <button onClick={()=>setShowLog(false)} style={btnS}>Cancel</button>
+                <button onClick={saveLog} style={btnP}>Save Log</button>
+              </div>
+            </Modal>
+          )}
+          <div style={{ display:"grid",gap:10 }}>
+            {stuLogs.slice(0,10).map(l=>(
+              <Card key={l.id} style={{ padding:16 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+                  <strong style={{ color:"#0f172a" }}>{l.date}</strong>
+                  <div style={{ display:"flex",gap:8 }}>
+                    <Badge text={l.mood} color="#0369a1" bg="#dbeafe"/>
+                    <Badge text={l.hygiene} color={l.hygiene==="No incidents"?"#166534":"#991b1b"} bg={l.hygiene==="No incidents"?"#dcfce7":"#fee2e2"}/>
+                  </div>
+                </div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,fontSize:13 }}>
+                  <div><span style={{ color:"#64748b" }}>Nap:</span> {l.napStart||"—"} – {l.napEnd||"—"}</div>
+                  <div><span style={{ color:"#64748b" }}>Feeding:</span> {l.feedingTimes||"—"}</div>
+                  <div><span style={{ color:"#64748b" }}>Entered by:</span> {l.enteredBy}</div>
+                </div>
+                {l.feedingNotes&&<p style={{ margin:"8px 0 0",fontSize:12,color:"#64748b" }}>🍽️ {l.feedingNotes}</p>}
+                {l.notes&&<p style={{ margin:"4px 0 0",fontSize:12,color:"#475569" }}>📝 {l.notes}</p>}
+              </Card>
+            ))}
+            {stuLogs.length===0&&<div style={{ textAlign:"center",color:"#9ca3af",padding:32 }}>No logs yet for {selStudent?.name}</div>}
+          </div>
+        </div>
+      )}
+
+      {selStu&&tab==="milestones"&&(
+        <div>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+            <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} style={{ ...inp,width:140 }}>
+              <option>Term 1</option><option>Term 2</option><option>Term 3</option>
+            </select>
+            <button onClick={()=>setShowMilestone(true)} style={btnP}>+ Rate Milestone</button>
+          </div>
+          {showMilestone&&(
+            <Modal title="Rate Milestone" onClose={()=>setShowMilestone(false)}>
+              <Row label="Category"><select value={msForm.category} onChange={e=>setMsForm(p=>({...p,category:e.target.value,milestone:""}))} style={inp}>
+                {Object.keys(MILESTONE_CATEGORIES).map(c=><option key={c}>{c}</option>)}
+              </select></Row>
+              <Row label="Milestone"><select value={msForm.milestone} onChange={e=>setMsForm(p=>({...p,milestone:e.target.value}))} style={inp}>
+                <option value="">Select...</option>
+                {(MILESTONE_CATEGORIES[msForm.category]||[]).map(m=><option key={m}>{m}</option>)}
+              </select></Row>
+              <Row label="Rating"><div style={{ display:"flex",gap:8 }}>
+                {MILESTONE_RATINGS.map(r=>(
+                  <button key={r} onClick={()=>setMsForm(p=>({...p,rating:r}))}
+                    style={{ ...btnSm,flex:1,padding:"8px 4px",background:msForm.rating===r?ratingColor(r):"#f1f5f9",color:msForm.rating===r?"#fff":"#374151",fontSize:12 }}>{r}</button>
+                ))}
+              </div></Row>
+              <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:12 }}>
+                <button onClick={()=>setShowMilestone(false)} style={btnS}>Cancel</button>
+                <button onClick={saveMilestone} style={btnP}>Save</button>
+              </div>
+            </Modal>
+          )}
+          {Object.entries(MILESTONE_CATEGORIES).map(([cat,items])=>(
+            <Card key={cat} style={{ padding:16,marginBottom:12 }}>
+              <h4 style={{ margin:"0 0 12px",color:"#0f172a",fontSize:14 }}>{cat}</h4>
+              <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:8 }}>
+                {items.map(item=>{
+                  const ms = stuMilestones.find(m=>m.milestone===item&&m.term===selTerm);
+                  return (
+                    <div key={item} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",borderRadius:8,background:"#f8fafc",fontSize:12 }}>
+                      <span style={{ color:"#374151" }}>{item}</span>
+                      {ms?<Badge text={ms.rating} color={ratingColor(ms.rating)}/>:<Badge text="Not Rated" color="#9ca3af" bg="#f3f4f6"/>}
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {selStu&&tab==="report"&&(
+        <Card style={{ padding:24 }}>
+          <div style={{ textAlign:"center",marginBottom:16,borderBottom:"2px solid #e5e7eb",paddingBottom:16 }}>
+            <div style={{ fontSize:18,fontWeight:700 }}>🍼 KG Progress Report</div>
+            <div style={{ fontSize:13,color:"#64748b" }}>Child: <strong>{selStudent?.name}</strong> | Class: {selStudent?.class} | {selTerm} 2024/2025</div>
+          </div>
+          <div style={{ marginBottom:16 }}>
+            <h4 style={{ margin:"0 0 10px",fontSize:14 }}>Daily Log Summary ({stuLogs.length} days recorded)</h4>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,fontSize:13 }}>
+              <div><strong>Happy days:</strong> {stuLogs.filter(l=>l.mood==="Happy"||l.mood==="Calm").length}</div>
+              <div><strong>No accidents:</strong> {stuLogs.filter(l=>l.hygiene==="No incidents").length}</div>
+              <div><strong>Avg nap:</strong> {stuLogs.filter(l=>l.napStart&&l.napEnd).length>0?"Recorded":"N/A"}</div>
+            </div>
+          </div>
+          {Object.entries(MILESTONE_CATEGORIES).map(([cat,items])=>{
+            const achieved = items.filter(i=>stuMilestones.find(m=>m.milestone===i&&m.rating==="Achieved")).length;
+            const total = items.length;
+            return (
+              <div key={cat} style={{ marginBottom:10 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:13 }}>
+                  <span><strong>{cat}</strong></span>
+                  <span style={{ color:achieved/total>=0.7?"#16a34a":"#d97706" }}>{achieved}/{total} achieved</span>
+                </div>
+                <div style={{ height:8,background:"#f1f5f9",borderRadius:4 }}>
+                  <div style={{ height:8,borderRadius:4,background:achieved/total>=0.7?"#16a34a":"#f59e0b",width:`${total>0?(achieved/total)*100:0}%` }}/>
+                </div>
+              </div>
+            );
+          })}
+          <button onClick={()=>window.print()} style={{ ...btnP,marginTop:16 }}>🖨️ Print Report</button>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── STAFF ───────────────────────────────────────────────────
+function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser }) {
+  const [filterRole,setFilterRole]=useState("");
+  const [showForm,setShowForm]=useState(false); const [editId,setEditId]=useState(null);
+  const blank = { name:"",role:"Teacher",pin:"",code:"",email:"",classAssigned:"",active:true,salary:1500,transport:150,housing:0,ssnit:true };
+  const [form,setForm]=useState(blank);
+
+  const roleColors = { Admin:"#7c3aed",Headmaster:"#1d4ed8",HOD:"#0369a1",Teacher:"#059669","Account Office":"#d97706",Librarian:"#6d28d9","Non-Teaching Staff":"#6b7280" };
+
+  const save = () => {
+    if(!form.name||!form.pin||!form.code){ notify("Name, PIN and Code required","error"); return; }
+    if(editId){ setUsers(p=>p.map(u=>u.id===editId?{...u,...form}:u)); addAudit(`Edited: ${form.name}`,"Staff"); notify("Staff updated"); }
+    else { setUsers(p=>[...p,{...form,id:uid("USR")}]); addAudit(`Added: ${form.name}`,"Staff"); notify("Staff added"); }
+    setShowForm(false); setEditId(null); setForm(blank);
+  };
+
+  const filtered = users.filter(u=>!filterRole||u.role===filterRole);
+
+  return (
+    <div>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+        <h2 style={{ margin:0,fontSize:20,fontWeight:700,color:"#0f172a" }}>👥 Staff Management</h2>
+        <button onClick={()=>{setShowForm(true);setEditId(null);setForm(blank);}} style={btnP}>+ Add Staff</button>
+      </div>
+      <select value={filterRole} onChange={e=>setFilterRole(e.target.value)} style={{ ...inp,width:200,marginBottom:14 }}>
+        <option value="">All Roles</option>
+        {ROLES.map(r=><option key={r}>{r}</option>)}
+      </select>
+      {showForm&&(
+        <Modal title={editId?"Edit Staff":"Add Staff"} onClose={()=>{setShowForm(false);setEditId(null);}}>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+            <Row label="Full Name"><input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} style={inp}/></Row>
+            <Row label="Staff Code"><input value={form.code} onChange={e=>setForm(p=>({...p,code:e.target.value.toUpperCase()}))} style={inp}/></Row>
+            <Row label="Role"><select value={form.role} onChange={e=>setForm(p=>({...p,role:e.target.value}))} style={inp}>{ROLES.map(r=><option key={r}>{r}</option>)}</select></Row>
+            <Row label="PIN (4 digits)"><input type="password" value={form.pin} onChange={e=>setForm(p=>({...p,pin:e.target.value}))} maxLength={4} style={inp}/></Row>
+            <Row label="Email"><input value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))} style={inp}/></Row>
+            {form.role==="Teacher"&&<Row label="Class"><select value={form.classAssigned||""} onChange={e=>setForm(p=>({...p,classAssigned:e.target.value}))} style={inp}><option value="">None</option>{CLASSES.map(c=><option key={c}>{c}</option>)}</select></Row>}
+            <Row label="Base Salary (GH₵)"><input type="number" value={form.salary||0} onChange={e=>setForm(p=>({...p,salary:+e.target.value}))} style={inp}/></Row>
+            <Row label="Transport (GH₵)"><input type="number" value={form.transport||0} onChange={e=>setForm(p=>({...p,transport:+e.target.value}))} style={inp}/></Row>
+            <Row label="Housing (GH₵)"><input type="number" value={form.housing||0} onChange={e=>setForm(p=>({...p,housing:+e.target.value}))} style={inp}/></Row>
+            <Row label="SSNIT"><select value={form.ssnit?"yes":"no"} onChange={e=>setForm(p=>({...p,ssnit:e.target.value==="yes"}))} style={inp}><option value="yes">Yes</option><option value="no">No</option></select></Row>
+            <Row label="Active"><select value={form.active?"yes":"no"} onChange={e=>setForm(p=>({...p,active:e.target.value==="yes"}))} style={inp}><option value="yes">Yes</option><option value="no">No (Archive)</option></select></Row>
+          </div>
+          <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:16 }}>
+            <button onClick={()=>{setShowForm(false);setEditId(null);}} style={btnS}>Cancel</button>
+            <button onClick={save} style={btnP}>Save</button>
+          </div>
+        </Modal>
+      )}
+      <Table cols={["ID","Code","Name","Role","Class","Email","Status","Locked","Actions"]}
+        rows={filtered.map(u=>{
+          const locked=(failedLogins[u.id]||0)>=3;
+          return (
+            <tr key={u.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+              <TD small color="#6b7280">{u.id}</TD>
+              <TD bold color="#1e40af">{u.code}</TD>
+              <TD bold>{u.name}</TD>
+              <td style={{ padding:"8px 12px" }}><Badge text={u.role} color={roleColors[u.role]||"#6b7280"}/></td>
+              <TD small color="#6b7280">{u.classAssigned||"—"}</TD>
+              <TD small color="#6b7280">{u.email}</TD>
+              <td style={{ padding:"8px 12px" }}><Badge text={u.active?"Active":"Inactive"} color={u.active?"#166534":"#991b1b"} bg={u.active?"#dcfce7":"#fee2e2"}/></td>
+              <td style={{ padding:"8px 12px" }}>{locked?<Badge text="LOCKED" color="#991b1b" bg="#fee2e2"/>:<Badge text="OK" color="#166534" bg="#dcfce7"/>}</td>
+              <td style={{ padding:"8px 12px",display:"flex",gap:4 }}>
+                <button onClick={()=>{setEditId(u.id);setForm({name:u.name,role:u.role,pin:u.pin,code:u.code,email:u.email,classAssigned:u.classAssigned||"",active:u.active,salary:u.salary||0,transport:u.transport||0,housing:u.housing||0,ssnit:u.ssnit!==false});setShowForm(true);}} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8" }}>Edit</button>
+                {locked&&<button onClick={()=>unlockUser(u.id)} style={{ ...btnSm,background:"#dcfce7",color:"#166534" }}>Unlock</button>}
+              </td>
+            </tr>
+          );
+        })}/>
+    </div>
+  );
+}
+
+// ─── GRADES ──────────────────────────────────────────────────
+function Grades({ grades,setGrades,students,curUser,notify,addAudit }) {
+  const isTeacher=curUser?.role==="Teacher"; const myClass=isTeacher?curUser?.classAssigned:null;
+  const [fc,setFc]=useState(myClass||""); const [fsub,setFsub]=useState(""); const [fterm,setFterm]=useState("");
+  const [showForm,setShowForm]=useState(false); const [editId,setEditId]=useState(null);
+  const blank={ studentId:"",subject:SUBJECTS[0],ca:"",exam:"",term:"Term 2",year:"2024/2025" };
+  const [form,setForm]=useState(blank);
+
+  const avStudents=students.filter(s=>s.status==="active"&&(!fc||s.class===fc)&&(!isTeacher||s.class===myClass));
+  const filtered=grades.filter(g=>{
+    const s=students.find(x=>x.id===g.studentId);
+    return (!fc||s?.class===fc)&&(!fsub||g.subject===fsub)&&(!fterm||g.term===fterm)&&(!isTeacher||s?.class===myClass);
+  });
+
+  const totalScore=(ca,exam)=>Math.min(30,+ca)+Math.min(70,+exam);
+
+  const save=()=>{
+    if(!form.studentId||!form.subject||form.ca===""||form.exam===""){ notify("All fields required","error"); return; }
+    if(+form.ca<0||+form.ca>30){ notify("CA must be 0–30","error"); return; }
+    if(+form.exam<0||+form.exam>70){ notify("Exam must be 0–70","error"); return; }
+    const score=totalScore(form.ca,form.exam); const grade=calcGrade(score);
+    if(editId){ setGrades(p=>p.map(g=>g.id===editId?{...g,...form,ca:+form.ca,exam:+form.exam,score,grade,enteredBy:curUser.code,date:todayStr()}:g)); addAudit(`Edited grade`,"Grades"); notify("Grade updated"); }
+    else { setGrades(p=>[...p,{id:uid("GRD"),...form,ca:+form.ca,exam:+form.exam,score,grade,enteredBy:curUser.code,date:todayStr()}]); addAudit(`Grade entered: ${form.subject}`,"Grades"); notify("Grade saved"); }
+    setShowForm(false); setEditId(null); setForm(blank);
+  };
+
+  const gradeColor=g=>g==="A"?"#16a34a":g==="B"?"#0369a1":g==="C"?"#d97706":g==="D"?"#ea580c":"#dc2626";
+
+  return (
+    <div>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+        <h2 style={{ margin:0,fontSize:20,fontWeight:700,color:"#0f172a" }}>📝 Grades (CA 30 + Exam 70)</h2>
+        <button onClick={()=>{setShowForm(true);setEditId(null);setForm(blank);}} style={btnP}>+ Enter Grade</button>
+      </div>
+      <div style={{ display:"flex",gap:8,marginBottom:14,flexWrap:"wrap" }}>
+        {isTeacher?<div style={{ padding:"8px 14px",background:"#dbeafe",borderRadius:8,fontSize:13,color:"#1d4ed8",fontWeight:600 }}>📌 {myClass}</div>:
+          <select value={fc} onChange={e=>setFc(e.target.value)} style={{ ...inp,width:160 }}><option value="">All Classes</option>{CLASSES.map(c=><option key={c}>{c}</option>)}</select>}
+        <select value={fsub} onChange={e=>setFsub(e.target.value)} style={{ ...inp,width:180 }}><option value="">All Subjects</option>{SUBJECTS.map(s=><option key={s}>{s}</option>)}</select>
+        <select value={fterm} onChange={e=>setFterm(e.target.value)} style={{ ...inp,width:120 }}><option value="">All Terms</option><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
+      </div>
+      {showForm&&(
+        <Modal title={editId?"Edit Grade":"Enter Grade"} onClose={()=>{setShowForm(false);setEditId(null);}}>
+          <Row label="Student"><select value={form.studentId} onChange={e=>setForm(p=>({...p,studentId:e.target.value}))} style={inp}><option value="">Select</option>{avStudents.map(s=><option key={s.id} value={s.id}>{s.name} — {s.class}</option>)}</select></Row>
+          <Row label="Subject"><select value={form.subject} onChange={e=>setForm(p=>({...p,subject:e.target.value}))} style={inp}>{SUBJECTS.map(s=><option key={s}>{s}</option>)}</select></Row>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+            <Row label="CA Score (out of 30)"><input type="number" min={0} max={30} value={form.ca} onChange={e=>setForm(p=>({...p,ca:e.target.value}))} style={inp}/></Row>
+            <Row label="Exam Score (out of 70)"><input type="number" min={0} max={70} value={form.exam} onChange={e=>setForm(p=>({...p,exam:e.target.value}))} style={inp}/></Row>
+          </div>
+          {form.ca!==""&&form.exam!==""&&(
+            <div style={{ background:"#f0fdf4",borderRadius:8,padding:12,textAlign:"center",marginBottom:8 }}>
+              <span style={{ fontSize:28,fontWeight:700,color:gradeColor(calcGrade(totalScore(form.ca,form.exam))) }}>{calcGrade(totalScore(form.ca,form.exam))}</span>
+              <span style={{ color:"#6b7280",fontSize:13,marginLeft:8 }}>Total: {totalScore(form.ca,form.exam)}/100</span>
+            </div>
+          )}
+          <Row label="Term"><select value={form.term} onChange={e=>setForm(p=>({...p,term:e.target.value}))} style={inp}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select></Row>
+          <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:12 }}>
+            <button onClick={()=>{setShowForm(false);setEditId(null);}} style={btnS}>Cancel</button>
+            <button onClick={save} style={btnP}>Save</button>
+          </div>
+        </Modal>
+      )}
+      <Table cols={["Student","Class","Subject","CA/30","Exam/70","Total","Grade","Term","By","Date","Actions"]}
+        rows={filtered.map(g=>{
+          const s=students.find(x=>x.id===g.studentId);
+          return (
+            <tr key={g.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+              <TD bold>{s?.name||g.studentId}</TD>
+              <TD small>{s?.class}</TD>
+              <TD>{g.subject}</TD>
+              <TD>{g.ca??"-"}</TD>
+              <TD>{g.exam??"-"}</TD>
+              <TD bold>{g.score}</TD>
+              <td style={{ padding:"8px 12px" }}><Badge text={g.grade} color={gradeColor(g.grade)}/></td>
+              <TD small>{g.term}</TD>
+              <TD small color="#6b7280">{g.enteredBy}</TD>
+              <TD small color="#6b7280">{g.date}</TD>
+              <td style={{ padding:"8px 12px" }}>
+                <button onClick={()=>{setEditId(g.id);setForm({studentId:g.studentId,subject:g.subject,ca:g.ca??0,exam:g.exam??0,term:g.term,year:g.year||"2024/2025"});setShowForm(true);}} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8" }}>Edit</button>
+              </td>
+            </tr>
+          );
+        })} emptyMsg="No grades found."/>
+    </div>
+  );
+}
+
+// ─── EXAMS ───────────────────────────────────────────────────
+function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,curUser,notify,addAudit }) {
+  const [tab,setTab]=useState("schedule");
+  const [showSched,setShowSched]=useState(false); const [showMock,setShowMock]=useState(false);
+  const schedBlank={ class:"JHS 3",subject:EXAM_SUBJECTS[0],date:"",startTime:"08:00",endTime:"10:00",venue:"Main Hall" };
+  const mockBlank={ studentId:"",subject:EXAM_SUBJECTS[0],score:"",examType:"Mock 1",term:"Term 2",year:"2024/2025" };
+  const [sf,setSf]=useState(schedBlank); const [mf,setMf]=useState(mockBlank);
+
+  const jhs3 = students.filter(s=>s.class==="JHS 3"&&s.status==="active");
+
+  const saveSched=()=>{
+    if(!sf.date||!sf.subject){ notify("Date and subject required","error"); return; }
+    setExamSchedule(p=>[...p,{id:uid("EXM"),...sf,createdBy:curUser.code}]);
+    addAudit(`Exam scheduled: ${sf.subject} ${sf.class}`,"Exams"); notify("Exam added"); setShowSched(false); setSf(schedBlank);
+  };
+
+  const saveMock=()=>{
+    if(!mf.studentId||mf.score===""){ notify("Student and score required","error"); return; }
+    setMockExams(p=>[...p,{id:uid("MCK"),...mf,score:+mf.score,enteredBy:curUser.code,date:todayStr()}]);
+    addAudit(`Mock result: ${mf.subject}`,"Exams"); notify("Mock result saved"); setShowMock(false); setMf(mockBlank);
+  };
+
+  // BECE prediction based on mock averages
+  const beceRisk = jhs3.map(s=>{
+    const mocks = mockExams.filter(m=>m.studentId===s.id);
+    if(!mocks.length) return { ...s, avg:null, risk:"No Data" };
+    const avg = Math.round(mocks.reduce((a,m)=>a+m.score,0)/mocks.length);
+    const risk = avg>=70?"Low Risk":avg>=50?"Watch":"At Risk";
+    return { ...s, avg, risk };
+  });
+
+  return (
+    <div>
+      <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>📖 Exam Management & BECE Prep</h2>
+      <Tabs tabs={[{key:"schedule",label:"📅 Exam Timetable"},{key:"mock",label:"📝 Mock Results"},{key:"bece",label:"🎯 BECE Prediction"}]} active={tab} onChange={setTab}/>
+
+      {tab==="schedule"&&(
+        <div>
+          <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:12 }}>
+            {(curUser?.role!=="Teacher")&&<button onClick={()=>setShowSched(true)} style={btnP}>+ Add Exam</button>}
+          </div>
+          {showSched&&(
+            <Modal title="Schedule Exam" onClose={()=>setShowSched(false)}>
+              <Row label="Class"><select value={sf.class} onChange={e=>setSf(p=>({...p,class:e.target.value}))} style={inp}>{CLASSES.map(c=><option key={c}>{c}</option>)}</select></Row>
+              <Row label="Subject"><select value={sf.subject} onChange={e=>setSf(p=>({...p,subject:e.target.value}))} style={inp}>{EXAM_SUBJECTS.map(s=><option key={s}>{s}</option>)}</select></Row>
+              <Row label="Date"><input type="date" value={sf.date} onChange={e=>setSf(p=>({...p,date:e.target.value}))} style={inp}/></Row>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                <Row label="Start Time"><input type="time" value={sf.startTime} onChange={e=>setSf(p=>({...p,startTime:e.target.value}))} style={inp}/></Row>
+                <Row label="End Time"><input type="time" value={sf.endTime} onChange={e=>setSf(p=>({...p,endTime:e.target.value}))} style={inp}/></Row>
+              </div>
+              <Row label="Venue"><input value={sf.venue} onChange={e=>setSf(p=>({...p,venue:e.target.value}))} style={inp}/></Row>
+              <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:12 }}>
+                <button onClick={()=>setShowSched(false)} style={btnS}>Cancel</button>
+                <button onClick={saveSched} style={btnP}>Save</button>
+              </div>
+            </Modal>
+          )}
+          <Table cols={["Class","Subject","Date","Time","Venue","Added By"]}
+            rows={[...examSchedule].sort((a,b)=>a.date.localeCompare(b.date)).map(e=>(
+              <tr key={e.id} style={{ borderBottom:"1px solid #f1f5f9",background:e.date===todayStr()?"#fffbeb":"#fff" }}>
+                <td style={{ padding:"8px 12px" }}><Badge text={e.class} color="#1d4ed8" bg="#dbeafe"/></td>
+                <TD bold>{e.subject}</TD>
+                <TD>{e.date}{e.date===todayStr()&&<span style={{ color:"#d97706",marginLeft:6,fontSize:11 }}>TODAY</span>}</TD>
+                <TD small>{e.startTime} – {e.endTime}</TD>
+                <TD>{e.venue}</TD>
+                <TD small color="#6b7280">{e.createdBy}</TD>
+              </tr>
+            ))} emptyMsg="No exams scheduled."/>
+        </div>
+      )}
+
+      {tab==="mock"&&(
+        <div>
+          <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:12 }}>
+            <button onClick={()=>setShowMock(true)} style={btnP}>+ Enter Mock Result</button>
+          </div>
+          {showMock&&(
+            <Modal title="Enter Mock Result" onClose={()=>setShowMock(false)}>
+              <Row label="Student"><select value={mf.studentId} onChange={e=>setMf(p=>({...p,studentId:e.target.value}))} style={inp}><option value="">Select</option>{students.filter(s=>s.status==="active").map(s=><option key={s.id} value={s.id}>{s.name} — {s.class}</option>)}</select></Row>
+              <Row label="Subject"><select value={mf.subject} onChange={e=>setMf(p=>({...p,subject:e.target.value}))} style={inp}>{EXAM_SUBJECTS.map(s=><option key={s}>{s}</option>)}</select></Row>
+              <Row label="Score (0–100)"><input type="number" min={0} max={100} value={mf.score} onChange={e=>setMf(p=>({...p,score:e.target.value}))} style={inp}/></Row>
+              <Row label="Exam Type"><select value={mf.examType} onChange={e=>setMf(p=>({...p,examType:e.target.value}))} style={inp}><option>Mock 1</option><option>Mock 2</option><option>Mock 3</option><option>Pre-BECE</option></select></Row>
+              <Row label="Term"><select value={mf.term} onChange={e=>setMf(p=>({...p,term:e.target.value}))} style={inp}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select></Row>
+              <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:12 }}>
+                <button onClick={()=>setShowMock(false)} style={btnS}>Cancel</button>
+                <button onClick={saveMock} style={btnP}>Save</button>
+              </div>
+            </Modal>
+          )}
+          <Table cols={["Student","Class","Subject","Score","Grade","Type","Term","By","Date"]}
+            rows={[...mockExams].reverse().map(m=>{
+              const s=students.find(x=>x.id===m.studentId);
+              return (
+                <tr key={m.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                  <TD bold>{s?.name}</TD><TD small>{s?.class}</TD><TD>{m.subject}</TD>
+                  <TD bold>{m.score}</TD>
+                  <td style={{ padding:"8px 12px" }}><Badge text={calcGrade(m.score)} color={m.score>=70?"#16a34a":m.score>=50?"#d97706":"#dc2626"}/></td>
+                  <TD small>{m.examType}</TD><TD small>{m.term}</TD><TD small color="#6b7280">{m.enteredBy}</TD><TD small color="#6b7280">{m.date}</TD>
+                </tr>
+              );
+            })} emptyMsg="No mock results."/>
+        </div>
+      )}
+
+      {tab==="bece"&&(
+        <div>
+          <div style={{ background:"#f0f9ff",borderRadius:10,padding:14,marginBottom:16,fontSize:13,color:"#0369a1" }}>
+            📊 BECE risk prediction based on mock exam averages for JHS 3 students.
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20 }}>
+            {[["🟢 Low Risk","Low Risk","#dcfce7","#166534"],["🟡 Watch","Watch","#fef3c7","#92400e"],["🔴 At Risk","At Risk","#fee2e2","#991b1b"]].map(([icon,risk,bg,color])=>(
+              <div key={risk} style={{ background:bg,borderRadius:10,padding:14,textAlign:"center" }}>
+                <div style={{ fontSize:22,marginBottom:4 }}>{icon}</div>
+                <div style={{ fontSize:22,fontWeight:700,color }}>{beceRisk.filter(s=>s.risk===risk).length}</div>
+                <div style={{ fontSize:12,color }}>{risk}</div>
+              </div>
+            ))}
+          </div>
+          <Table cols={["Student","Mock Avg","Risk Level","Subjects Taken","Recommendation"]}
+            rows={beceRisk.map(s=>(
+              <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                <TD bold>{s.name}</TD>
+                <TD bold color={s.avg>=70?"#16a34a":s.avg>=50?"#d97706":"#dc2626"}>{s.avg!==null?s.avg+"%":"—"}</TD>
+                <td style={{ padding:"8px 12px" }}>
+                  <Badge text={s.risk} color={s.risk==="Low Risk"?"#166534":s.risk==="Watch"?"#92400e":"#991b1b"} bg={s.risk==="Low Risk"?"#dcfce7":s.risk==="Watch"?"#fef3c7":"#fee2e2"}/>
+                </td>
+                <TD>{mockExams.filter(m=>m.studentId===s.id).length}</TD>
+                <TD small color="#64748b">{s.risk==="Low Risk"?"Keep up good work":s.risk==="Watch"?"Extra support needed":"Urgent intervention required"}</TD>
+              </tr>
+            ))} emptyMsg="No JHS 3 students found."/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ATTENDANCE ──────────────────────────────────────────────
+function Attendance({ attendance,setAttendance,students,curUser,notify,addAudit }) {
+  const isTeacher=curUser?.role==="Teacher"; const myClass=isTeacher?curUser?.classAssigned:null;
+  const [date,setDate]=useState(todayStr()); const [selClass,setSelClass]=useState(myClass||CLASSES[5]);
+  const [view,setView]=useState("mark");
+
+  const classStu=students.filter(s=>s.status==="active"&&s.class===selClass);
+  const forDate=attendance.filter(a=>a.date===date&&a.class===selClass);
+  const getStatus=sid=>forDate.find(a=>a.studentId===sid)?.status||"";
+
+  const mark=(sid,status)=>{
+    const ex=attendance.find(a=>a.date===date&&a.class===selClass&&a.studentId===sid);
+    if(ex){ setAttendance(p=>p.map(a=>a.id===ex.id?{...a,status,enteredBy:curUser.code}:a)); }
+    else { setAttendance(p=>[...p,{id:uid("ATT"),studentId:sid,class:selClass,date,status,enteredBy:curUser.code}]); }
+  };
+
+  const markAll=st=>{ classStu.forEach(s=>mark(s.id,st)); notify(`All marked ${st}`); };
+
+  const statusColor=s=>s==="Present"?"#16a34a":s==="Absent"?"#dc2626":s==="Late"?"#d97706":"#6b7280";
+  const statusBg=s=>s==="Present"?"#dcfce7":s==="Absent"?"#fee2e2":s==="Late"?"#fef3c7":"#f3f4f6";
+
+  const history=[...attendance].sort((a,b)=>b.date.localeCompare(a.date)).filter(a=>!isTeacher||a.class===myClass);
+
+  // Attendance summary per student
+  const summary=students.filter(s=>s.status==="active"&&(!isTeacher||s.class===myClass)).map(s=>{
+    const all=attendance.filter(a=>a.studentId===s.id);
+    const present=all.filter(a=>a.status==="Present").length;
+    const rate=all.length?Math.round((present/all.length)*100):100;
+    return {...s,total:all.length,present,rate};
+  }).sort((a,b)=>a.rate-b.rate);
+
+  return (
+    <div>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+        <h2 style={{ margin:0,fontSize:20,fontWeight:700,color:"#0f172a" }}>✅ Attendance</h2>
+        <Tabs tabs={[{key:"mark",label:"Mark"},{key:"history",label:"History"},{key:"summary",label:"Summary"}]} active={view} onChange={setView}/>
+      </div>
+
       {view==="mark"&&(
         <>
-          <div style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap" }}>
-            <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}/>
-            {!isTeacher&&<select value={selClass} onChange={e=>setSelClass(e.target.value)} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}>
-              {classes.map(c=><option key={c}>{c}</option>)}
-            </select>}
-            {isTeacher&&<div style={{ padding:"8px 14px", background:"#dbeafe", borderRadius:8, fontSize:13, color:"#1d4ed8", fontWeight:600 }}>📌 {selClass}</div>}
-            <button onClick={()=>markAll("Present")} style={{ ...btnSmall, background:"#dcfce7", color:"#166534", padding:"8px 14px" }}>✅ Mark All Present</button>
-            <button onClick={()=>markAll("Absent")} style={{ ...btnSmall, background:"#fee2e2", color:"#991b1b", padding:"8px 14px" }}>❌ Mark All Absent</button>
-            <button onClick={saveAll} style={{ ...btnPrimary, padding:"8px 14px" }}>💾 Save</button>
+          <div style={{ display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center" }}>
+            <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={{ ...inp,width:170 }}/>
+            {isTeacher?<div style={{ padding:"8px 14px",background:"#dbeafe",borderRadius:8,fontSize:13,color:"#1d4ed8",fontWeight:600 }}>📌 {selClass}</div>:
+              <select value={selClass} onChange={e=>setSelClass(e.target.value)} style={{ ...inp,width:160 }}>{CLASSES.map(c=><option key={c}>{c}</option>)}</select>}
+            <button onClick={()=>markAll("Present")} style={{ ...btnSm,background:"#dcfce7",color:"#166534",padding:"8px 14px" }}>✅ All Present</button>
+            <button onClick={()=>markAll("Absent")} style={{ ...btnSm,background:"#fee2e2",color:"#991b1b",padding:"8px 14px" }}>❌ All Absent</button>
+            <button onClick={()=>{ addAudit(`Attendance saved: ${selClass} ${date}`,"Attendance"); notify("Attendance saved ✅"); }} style={{ ...btnP,padding:"8px 14px" }}>💾 Save</button>
           </div>
-          <div style={{ background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+          <Card>
+            <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
               <thead><tr style={{ background:"#f8fafc" }}>
-                {["Student","ID","Status"].map(h=>(
-                  <th key={h} style={{ padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#374151", borderBottom:"1px solid #e5e7eb" }}>{h}</th>
-                ))}
+                {["#","Student","Present","Absent","Late","Excused"].map(h=><th key={h} style={{ padding:"10px 12px",textAlign:"left",fontWeight:600,color:"#374151",borderBottom:"1px solid #e5e7eb" }}>{h}</th>)}
               </tr></thead>
               <tbody>
-                {classStudents.map(s=>{
-                  const st = getStatus(s.id);
+                {classStu.map((s,i)=>{
+                  const st=getStatus(s.id);
                   return (
-                    <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9", background:st==="Present"?"#f0fdf4":st==="Absent"?"#fff7f7":"#fff" }}>
-                      <td style={{ padding:"8px 12px", fontWeight:600 }}>{s.name}</td>
-                      <td style={{ padding:"8px 12px", color:"#6b7280" }}>{s.id}</td>
-                      <td style={{ padding:"8px 12px" }}>
-                        <div style={{ display:"flex", gap:6 }}>
-                          {["Present","Absent","Late","Excused"].map(opt=>(
-                            <button key={opt} onClick={()=>markStudent(s.id,opt)}
-                              style={{ padding:"4px 10px", borderRadius:6, border:"none", cursor:"pointer", fontSize:11, fontWeight:600,
-                                background:st===opt?(opt==="Present"?"#16a34a":opt==="Absent"?"#dc2626":opt==="Late"?"#d97706":"#6b7280"):(opt==="Present"?"#dcfce7":opt==="Absent"?"#fee2e2":opt==="Late"?"#fef3c7":"#f3f4f6"),
-                                color:st===opt?"#fff":(opt==="Present"?"#166534":opt==="Absent"?"#991b1b":opt==="Late"?"#92400e":"#374151")
-                              }}>{opt}</button>
-                          ))}
-                        </div>
-                      </td>
+                    <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9",background:st?statusBg(st):"#fff" }}>
+                      <TD small color="#9ca3af">{i+1}</TD>
+                      <TD bold>{s.name}</TD>
+                      {["Present","Absent","Late","Excused"].map(opt=>(
+                        <td key={opt} style={{ padding:"6px 12px" }}>
+                          <button onClick={()=>mark(s.id,opt)} style={{ padding:"5px 12px",borderRadius:6,border:"none",cursor:"pointer",fontWeight:600,fontSize:11,
+                            background:st===opt?statusColor(opt):statusBg(opt),color:st===opt?"#fff":statusColor(opt) }}>{opt}</button>
+                        </td>
+                      ))}
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-          </div>
+          </Card>
         </>
       )}
+
       {view==="history"&&(
-        <div style={{ background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-            <thead><tr style={{ background:"#f8fafc" }}>
-              {["Date","Student","Class","Status","Entered By"].map(h=>(
-                <th key={h} style={{ padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#374151", borderBottom:"1px solid #e5e7eb" }}>{h}</th>
-              ))}
-            </tr></thead>
-            <tbody>
-              {history.slice(0,50).map(a=>{
-                const stu=students.find(s=>s.id===a.studentId);
-                return (
-                  <tr key={a.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
-                    <td style={{ padding:"8px 12px" }}>{a.date}</td>
-                    <td style={{ padding:"8px 12px", fontWeight:600 }}>{stu?.name||a.studentId}</td>
-                    <td style={{ padding:"8px 12px" }}>{a.class}</td>
-                    <td style={{ padding:"8px 12px" }}>
-                      <span style={{ background:a.status==="Present"?"#dcfce7":a.status==="Absent"?"#fee2e2":"#fef3c7", color:a.status==="Present"?"#166534":a.status==="Absent"?"#991b1b":"#92400e", padding:"2px 8px", borderRadius:10, fontSize:11, fontWeight:600 }}>{a.status}</span>
-                    </td>
-                    <td style={{ padding:"8px 12px", color:"#6b7280", fontSize:11 }}>{a.enteredBy}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <Table cols={["Date","Student","Class","Status","By"]}
+          rows={history.slice(0,60).map(a=>{
+            const s=students.find(x=>x.id===a.studentId);
+            return (
+              <tr key={a.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                <TD>{a.date}</TD><TD bold>{s?.name}</TD><TD small>{a.class}</TD>
+                <td style={{ padding:"8px 12px" }}><Badge text={a.status} color={statusColor(a.status)} bg={statusBg(a.status)}/></td>
+                <TD small color="#6b7280">{a.enteredBy}</TD>
+              </tr>
+            );
+          })} emptyMsg="No attendance records."/>
+      )}
+
+      {view==="summary"&&(
+        <Table cols={["Student","Class","Days Recorded","Present","Rate","Alert"]}
+          rows={summary.map(s=>(
+            <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9",background:s.rate<70?"#fff7f7":"#fff" }}>
+              <TD bold>{s.name}</TD><TD small>{s.class}</TD><TD>{s.total}</TD><TD>{s.present}</TD>
+              <td style={{ padding:"8px 12px" }}>
+                <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                  <div style={{ flex:1,height:8,background:"#f1f5f9",borderRadius:4,minWidth:80 }}>
+                    <div style={{ height:8,borderRadius:4,background:s.rate>=80?"#16a34a":s.rate>=60?"#f59e0b":"#dc2626",width:`${s.rate}%` }}/>
+                  </div>
+                  <span style={{ fontSize:12,fontWeight:600,color:s.rate>=80?"#16a34a":s.rate>=60?"#d97706":"#dc2626" }}>{s.rate}%</span>
+                </div>
+              </td>
+              <td style={{ padding:"8px 12px" }}>{s.rate<70&&<Badge text="Low Attendance" color="#991b1b" bg="#fee2e2"/>}</td>
+            </tr>
+          ))} emptyMsg="No students."/>
       )}
     </div>
   );
 }
 
-// ============================================================
-// FINANCE
-// ============================================================
-function Finance({ fees, setFees, expenses, setExpenses, students, school, currentUser, notify, addAudit }) {
-  const [tab, setTab] = useState("fees");
-  const [showReceipt, setShowReceipt] = useState(null);
-  const [feeForm, setFeeForm] = useState({ studentId:"", amount:"", paid:"", term:"Term 2", year:"2024/2025" });
-  const [expForm, setExpForm] = useState({ description:"", amount:"", category:"Supplies", date:today() });
-  const [showFeeForm, setShowFeeForm]  = useState(false);
-  const [showExpForm, setShowExpForm]  = useState(false);
-  const [reportPeriod, setReportPeriod] = useState("monthly");
+// ─── FINANCE ─────────────────────────────────────────────────
+function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school,curUser,notify,addAudit }) {
+  const [tab,setTab]=useState("fees");
+  const [receipt,setReceipt]=useState(null);
+  const [showFee,setShowFee]=useState(false); const [showExp,setShowExp]=useState(false);
+  const [feeForm,setFeeForm]=useState({ studentId:"",amount:"",paid:"",term:"Term 2",year:"2024/2025" });
+  const [expForm,setExpForm]=useState({ description:"",amount:"",category:"Supplies",date:todayStr() });
+  const [period,setPeriod]=useState("monthly");
 
-  const savePayment = () => {
-    if(!feeForm.studentId||!feeForm.paid) { notify("Student and amount paid required","error"); return; }
-    const stu = students.find(s=>s.id===feeForm.studentId);
-    const rec = {
-      id:uid("FEE"), studentId:feeForm.studentId, amount:+feeForm.amount||+feeForm.paid,
-      paid:+feeForm.paid, balance:(+feeForm.amount||+feeForm.paid)-(+feeForm.paid),
-      term:feeForm.term, year:feeForm.year,
-      receiptNo:`RCP${Date.now().toString().slice(-5)}`,
-      date:today(), enteredBy:currentUser.code
-    };
-    setFees(prev=>[...prev,rec]);
-    addAudit(`Fee payment: ${stu?.name} — ${formatGHS(+feeForm.paid)}`,"Finance");
-    setShowReceipt({...rec, studentName:stu?.name, studentClass:stu?.class});
-    setShowFeeForm(false); setFeeForm({ studentId:"", amount:"", paid:"", term:"Term 2", year:"2024/2025" });
-    notify("Payment recorded ✅");
+  const saveFee=()=>{
+    if(!feeForm.studentId||!feeForm.paid){ notify("Student and amount required","error"); return; }
+    const stu=students.find(s=>s.id===feeForm.studentId);
+    const rec={ id:uid("FEE"),studentId:feeForm.studentId,amount:+feeForm.amount||+feeForm.paid,paid:+feeForm.paid,
+      balance:(+feeForm.amount||+feeForm.paid)-(+feeForm.paid),term:feeForm.term,year:feeForm.year,
+      receiptNo:`RCP${Date.now().toString().slice(-5)}`,date:todayStr(),enteredBy:curUser.code };
+    setFees(p=>[...p,rec]);
+    setStudents&&setStudents(p=>p.map(s=>s.id===feeForm.studentId?{...s,paid:s.paid+(+feeForm.paid)}:s));
+    addAudit(`Fee: ${stu?.name} ${formatGHS(+feeForm.paid)}`,"Finance");
+    setReceipt({...rec,studentName:stu?.name,studentClass:stu?.class,guardian:stu?.guardian});
+    setShowFee(false); setFeeForm({studentId:"",amount:"",paid:"",term:"Term 2",year:"2024/2025"}); notify("Payment recorded ✅");
   };
 
-  const saveExpense = () => {
-    if(!expForm.description||!expForm.amount) { notify("Description and amount required","error"); return; }
-    setExpenses(prev=>[...prev,{id:uid("EXP"),...expForm,amount:+expForm.amount,enteredBy:currentUser.code}]);
-    addAudit(`Expense: ${expForm.description} — ${formatGHS(+expForm.amount)}`,"Finance");
-    setShowExpForm(false); setExpForm({ description:"", amount:"", category:"Supplies", date:today() });
-    notify("Expense recorded");
+  const saveExp=()=>{
+    if(!expForm.description||!expForm.amount){ notify("Description and amount required","error"); return; }
+    setExpenses(p=>[...p,{id:uid("EXP"),...expForm,amount:+expForm.amount,enteredBy:curUser.code}]);
+    addAudit(`Expense: ${expForm.description} ${formatGHS(+expForm.amount)}`,"Finance"); notify("Expense recorded");
+    setShowExp(false); setExpForm({description:"",amount:"",category:"Supplies",date:todayStr()});
   };
 
-  const totalFees    = fees.reduce((a,f)=>a+f.paid,0);
-  const totalExp     = expenses.reduce((a,e)=>a+e.amount,0);
-  const netBalance   = totalFees - totalExp;
+  const totalPaid=fees.reduce((a,f)=>a+f.paid,0);
+  const totalExp=expenses.reduce((a,e)=>a+e.amount,0);
 
-  // Financial report by period
-  const getReport = () => {
-    const now2 = new Date();
-    const filt = (arr, dateField) => arr.filter(item=>{
-      const d = new Date(item[dateField]);
-      if(reportPeriod==="weekly")    return (now2-d)/(1000*60*60*24)<=7;
-      if(reportPeriod==="monthly")   return d.getMonth()===now2.getMonth()&&d.getFullYear()===now2.getFullYear();
-      if(reportPeriod==="quarterly") return Math.floor(d.getMonth()/3)===Math.floor(now2.getMonth()/3)&&d.getFullYear()===now2.getFullYear();
-      if(reportPeriod==="yearly")    return d.getFullYear()===now2.getFullYear();
-      if(reportPeriod==="term1")     return item.term==="Term 1";
-      if(reportPeriod==="term2")     return item.term==="Term 2";
-      if(reportPeriod==="term3")     return item.term==="Term 3";
+  const getReport=()=>{
+    const now=new Date();
+    const filt=(arr,df)=>arr.filter(item=>{
+      const d=new Date(item[df]);
+      if(period==="weekly") return (now-d)/(86400000)<=7;
+      if(period==="monthly") return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();
+      if(period==="quarterly") return Math.floor(d.getMonth()/3)===Math.floor(now.getMonth()/3)&&d.getFullYear()===now.getFullYear();
+      if(period==="yearly") return d.getFullYear()===now.getFullYear();
+      if(period==="term1") return item.term==="Term 1";
+      if(period==="term2") return item.term==="Term 2";
+      if(period==="term3") return item.term==="Term 3";
       return true;
     });
-    const rFees = filt(fees,"date"); const rExp = filt(expenses,"date");
-    return { fees:rFees.reduce((a,f)=>a+f.paid,0), expenses:rExp.reduce((a,e)=>a+e.amount,0), feeCount:rFees.length, expCount:rExp.length };
+    const rf=filt(fees,"date"); const re=filt(expenses,"date");
+    return { income:rf.reduce((a,f)=>a+f.paid,0), expenses:re.reduce((a,e)=>a+e.amount,0), feeCount:rf.length, expCount:re.length };
   };
-
-  const rep = getReport();
+  const rep=getReport();
 
   return (
     <div>
-      <h2 style={{ margin:"0 0 16px", fontSize:20, fontWeight:700, color:"#0f172a" }}>💰 Finance</h2>
-      <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
-        {["fees","expenses","report"].map(t=>(
-          <button key={t} onClick={()=>setTab(t)} style={{ padding:"8px 18px", borderRadius:8, border:"none", cursor:"pointer", fontWeight:600, fontSize:13,
-            background:tab===t?"#1e40af":"#e5e7eb", color:tab===t?"#fff":"#374151" }}>
-            {t==="fees"?"📥 Fees":t==="expenses"?"📤 Expenses":"📊 Financial Report"}
-          </button>
-        ))}
-      </div>
+      <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>💰 Finance</h2>
+      <Tabs tabs={[{key:"fees",label:"📥 Fees"},{key:"expenses",label:"📤 Expenses"},{key:"report",label:"📊 Reports"}]} active={tab} onChange={setTab}/>
 
-      {/* RECEIPT MODAL */}
-      {showReceipt&&(
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center" }}>
-          <div style={{ background:"#fff", borderRadius:12, padding:32, maxWidth:420, width:"90%", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
-            <div style={{ textAlign:"center", marginBottom:16 }}>
-              <div style={{ fontSize:28 }}>🧾</div>
-              <h3 style={{ margin:0, fontSize:18, fontWeight:700, color:"#0f172a" }}>{school.name}</h3>
-              <p style={{ margin:"4px 0", fontSize:12, color:"#64748b" }}>{school.address}</p>
-              <p style={{ margin:"2px 0", fontSize:12, color:"#64748b" }}>{school.phone} | {school.email}</p>
-              <div style={{ borderTop:"2px dashed #e5e7eb", marginTop:10, paddingTop:10 }}>
-                <div style={{ fontSize:15, fontWeight:700, color:"#1e40af" }}>PAYMENT RECEIPT</div>
-                <div style={{ fontSize:13, color:"#6b7280" }}>Receipt No: {showReceipt.receiptNo}</div>
-              </div>
-            </div>
-            <div style={{ fontSize:13, lineHeight:2 }}>
-              <div><strong>Student:</strong> {showReceipt.studentName}</div>
-              <div><strong>Class:</strong> {showReceipt.studentClass}</div>
-              <div><strong>Term:</strong> {showReceipt.term} — {showReceipt.year}</div>
-              <div><strong>Date:</strong> {showReceipt.date}</div>
-              <div style={{ borderTop:"1px solid #e5e7eb", marginTop:8, paddingTop:8 }}>
-                <div><strong>Amount Due:</strong> {formatGHS(showReceipt.amount)}</div>
-                <div style={{ color:"#16a34a", fontWeight:700 }}><strong>Amount Paid:</strong> {formatGHS(showReceipt.paid)}</div>
-                <div style={{ color:showReceipt.balance>0?"#dc2626":"#16a34a", fontWeight:600 }}><strong>Balance:</strong> {formatGHS(showReceipt.balance)}</div>
-              </div>
-            </div>
-            <div style={{ display:"flex", gap:8, marginTop:16 }}>
-              <button onClick={()=>window.print()} style={{ ...btnPrimary, flex:1 }}>🖨️ Print</button>
-              <button onClick={()=>setShowReceipt(null)} style={{ ...btnSecondary, flex:1 }}>Close</button>
+      {receipt&&(
+        <Modal title="Payment Receipt" onClose={()=>setReceipt(null)}>
+          <div style={{ textAlign:"center",marginBottom:16 }}>
+            <div style={{ fontSize:20,fontWeight:700 }}>{school.name}</div>
+            <div style={{ fontSize:12,color:"#64748b" }}>{school.address}</div>
+            <div style={{ fontSize:12,color:"#64748b" }}>{school.phone} | {school.email}</div>
+            <div style={{ borderTop:"2px dashed #e5e7eb",marginTop:10,paddingTop:10 }}>
+              <div style={{ fontWeight:700,color:"#1e40af",fontSize:15 }}>OFFICIAL FEE RECEIPT</div>
+              <div style={{ fontSize:12,color:"#6b7280" }}>Receipt No: {receipt.receiptNo}</div>
             </div>
           </div>
-        </div>
+          <div style={{ fontSize:13,lineHeight:2.2,background:"#f8fafc",borderRadius:8,padding:14 }}>
+            <div><strong>Student:</strong> {receipt.studentName}</div>
+            <div><strong>Class:</strong> {receipt.studentClass}</div>
+            <div><strong>Guardian:</strong> {receipt.guardian}</div>
+            <div><strong>Term:</strong> {receipt.term} — {receipt.year}</div>
+            <div><strong>Date:</strong> {receipt.date}</div>
+            <div style={{ borderTop:"1px solid #e5e7eb",marginTop:6,paddingTop:6 }}>
+              <div><strong>Amount Due:</strong> {formatGHS(receipt.amount)}</div>
+              <div style={{ color:"#16a34a",fontWeight:700 }}><strong>Amount Paid:</strong> {formatGHS(receipt.paid)}</div>
+              <div style={{ color:receipt.balance>0?"#dc2626":"#16a34a",fontWeight:700 }}><strong>Balance:</strong> {formatGHS(receipt.balance)}</div>
+            </div>
+          </div>
+          <div style={{ fontSize:11,color:"#9ca3af",textAlign:"center",marginTop:10 }}>Issued by: {receipt.enteredBy} | {school.name}</div>
+          <div style={{ display:"flex",gap:8,marginTop:14 }}>
+            <button onClick={()=>window.print()} style={{ ...btnP,flex:1 }}>🖨️ Print</button>
+            <button onClick={()=>setReceipt(null)} style={{ ...btnS,flex:1 }}>Close</button>
+          </div>
+        </Modal>
       )}
 
       {tab==="fees"&&(
         <>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-            <div style={{ display:"flex", gap:10 }}>
-              <div style={{ background:"#dcfce7", borderRadius:10, padding:"10px 18px" }}>
-                <div style={{ fontSize:11, color:"#166534" }}>Total Collected</div>
-                <div style={{ fontSize:18, fontWeight:700, color:"#16a34a" }}>{formatGHS(totalFees)}</div>
-              </div>
-              <div style={{ background:"#fee2e2", borderRadius:10, padding:"10px 18px" }}>
-                <div style={{ fontSize:11, color:"#991b1b" }}>Total Outstanding</div>
-                <div style={{ fontSize:18, fontWeight:700, color:"#dc2626" }}>{formatGHS(students.filter(s=>s.status==="active").reduce((a,s)=>a+(s.fees-s.paid),0))}</div>
-              </div>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+            <div style={{ display:"flex",gap:10 }}>
+              <StatCard icon="💰" label="Total Collected" value={formatGHS(totalPaid)} color="#16a34a"/>
+              <StatCard icon="⚠️" label="Outstanding" value={formatGHS(students.filter(s=>s.status==="active").reduce((a,s)=>a+(s.fees-s.paid),0))} color="#dc2626"/>
             </div>
-            <button onClick={()=>setShowFeeForm(true)} style={btnPrimary}>+ Record Payment</button>
+            <button onClick={()=>setShowFee(true)} style={btnP}>+ Record Payment</button>
           </div>
-          {showFeeForm&&(
-            <FormModal title="Record Fee Payment" onClose={()=>setShowFeeForm(false)}>
-              <FormRow label="Student">
-                <select value={feeForm.studentId} onChange={e=>setFeeForm(p=>({...p,studentId:e.target.value}))} style={inp}>
-                  <option value="">Select student</option>
-                  {students.filter(s=>s.status==="active").map(s=><option key={s.id} value={s.id}>{s.name} — {s.class} (Balance: {formatGHS(s.fees-s.paid)})</option>)}
-                </select>
-              </FormRow>
-              <FormRow label="Total Fees (GH₵)"><input type="number" value={feeForm.amount} onChange={e=>setFeeForm(p=>({...p,amount:e.target.value}))} style={inp}/></FormRow>
-              <FormRow label="Amount Paid (GH₵)"><input type="number" value={feeForm.paid} onChange={e=>setFeeForm(p=>({...p,paid:e.target.value}))} style={inp}/></FormRow>
-              <FormRow label="Term">
-                <select value={feeForm.term} onChange={e=>setFeeForm(p=>({...p,term:e.target.value}))} style={inp}>
-                  <option>Term 1</option><option>Term 2</option><option>Term 3</option>
-                </select>
-              </FormRow>
-              <FormRow label="Year"><input value={feeForm.year} onChange={e=>setFeeForm(p=>({...p,year:e.target.value}))} style={inp}/></FormRow>
-              <div style={{ display:"flex", justifyContent:"flex-end", gap:10, marginTop:16 }}>
-                <button onClick={()=>setShowFeeForm(false)} style={btnSecondary}>Cancel</button>
-                <button onClick={savePayment} style={btnPrimary}>Record & Print Receipt</button>
+          {showFee&&(
+            <Modal title="Record Fee Payment" onClose={()=>setShowFee(false)}>
+              <Row label="Student"><select value={feeForm.studentId} onChange={e=>setFeeForm(p=>({...p,studentId:e.target.value}))} style={inp}>
+                <option value="">Select</option>
+                {students.filter(s=>s.status==="active").map(s=><option key={s.id} value={s.id}>{s.name} — {s.class} (Bal: {formatGHS(s.fees-s.paid)})</option>)}
+              </select></Row>
+              <Row label="Total Fees (GH₵)"><input type="number" value={feeForm.amount} onChange={e=>setFeeForm(p=>({...p,amount:e.target.value}))} style={inp}/></Row>
+              <Row label="Amount Paying Now (GH₵)"><input type="number" value={feeForm.paid} onChange={e=>setFeeForm(p=>({...p,paid:e.target.value}))} style={inp}/></Row>
+              <Row label="Term"><select value={feeForm.term} onChange={e=>setFeeForm(p=>({...p,term:e.target.value}))} style={inp}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select></Row>
+              <Row label="Year"><input value={feeForm.year} onChange={e=>setFeeForm(p=>({...p,year:e.target.value}))} style={inp}/></Row>
+              <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:12 }}>
+                <button onClick={()=>setShowFee(false)} style={btnS}>Cancel</button>
+                <button onClick={saveFee} style={btnP}>Record & Print Receipt</button>
               </div>
-            </FormModal>
+            </Modal>
           )}
-          <div style={{ background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-              <thead><tr style={{ background:"#f8fafc" }}>
-                {["Receipt","Student","Amount","Paid","Balance","Term","Date","Recorded By"].map(h=>(
-                  <th key={h} style={{ padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#374151", borderBottom:"1px solid #e5e7eb" }}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {[...fees].reverse().map(f=>{
-                  const stu=students.find(s=>s.id===f.studentId);
-                  return (
-                    <tr key={f.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
-                      <td style={{ padding:"8px 12px", color:"#6b7280", fontSize:11 }}>{f.receiptNo}</td>
-                      <td style={{ padding:"8px 12px", fontWeight:600 }}>{stu?.name||f.studentId}</td>
-                      <td style={{ padding:"8px 12px" }}>{formatGHS(f.amount)}</td>
-                      <td style={{ padding:"8px 12px", color:"#16a34a", fontWeight:600 }}>{formatGHS(f.paid)}</td>
-                      <td style={{ padding:"8px 12px", color:f.balance>0?"#dc2626":"#16a34a", fontWeight:600 }}>{formatGHS(f.balance)}</td>
-                      <td style={{ padding:"8px 12px" }}>{f.term}</td>
-                      <td style={{ padding:"8px 12px" }}>{f.date}</td>
-                      <td style={{ padding:"8px 12px", color:"#6b7280", fontSize:11 }}>{f.enteredBy}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <Table cols={["Receipt","Student","Class","Amount","Paid","Balance","Term","Date","By"]}
+            rows={[...fees].reverse().map(f=>{ const s=students.find(x=>x.id===f.studentId); return (
+              <tr key={f.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                <TD small color="#6b7280">{f.receiptNo}</TD>
+                <TD bold>{s?.name}</TD><TD small>{s?.class}</TD>
+                <TD>{formatGHS(f.amount)}</TD>
+                <TD color="#16a34a" bold>{formatGHS(f.paid)}</TD>
+                <TD color={f.balance>0?"#dc2626":"#16a34a"} bold>{formatGHS(f.balance)}</TD>
+                <TD small>{f.term}</TD><TD small>{f.date}</TD><TD small color="#6b7280">{f.enteredBy}</TD>
+              </tr>
+            );})} emptyMsg="No payments recorded."/>
         </>
       )}
 
       {tab==="expenses"&&(
         <>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-            <div style={{ background:"#fef3c7", borderRadius:10, padding:"10px 18px" }}>
-              <div style={{ fontSize:11, color:"#92400e" }}>Total Expenses</div>
-              <div style={{ fontSize:18, fontWeight:700, color:"#d97706" }}>{formatGHS(totalExp)}</div>
-            </div>
-            <button onClick={()=>setShowExpForm(true)} style={btnPrimary}>+ Add Expense</button>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+            <StatCard icon="📤" label="Total Expenses" value={formatGHS(totalExp)} color="#d97706"/>
+            <button onClick={()=>setShowExp(true)} style={btnP}>+ Add Expense</button>
           </div>
-          {showExpForm&&(
-            <FormModal title="Record Expense" onClose={()=>setShowExpForm(false)}>
-              <FormRow label="Description"><input value={expForm.description} onChange={e=>setExpForm(p=>({...p,description:e.target.value}))} style={inp}/></FormRow>
-              <FormRow label="Amount (GH₵)"><input type="number" value={expForm.amount} onChange={e=>setExpForm(p=>({...p,amount:e.target.value}))} style={inp}/></FormRow>
-              <FormRow label="Category">
-                <select value={expForm.category} onChange={e=>setExpForm(p=>({...p,category:e.target.value}))} style={inp}>
-                  {["Supplies","Utilities","Maintenance","Staff","Infrastructure","Events","Other"].map(c=><option key={c}>{c}</option>)}
-                </select>
-              </FormRow>
-              <FormRow label="Date"><input type="date" value={expForm.date} onChange={e=>setExpForm(p=>({...p,date:e.target.value}))} style={inp}/></FormRow>
-              <div style={{ display:"flex", justifyContent:"flex-end", gap:10, marginTop:16 }}>
-                <button onClick={()=>setShowExpForm(false)} style={btnSecondary}>Cancel</button>
-                <button onClick={saveExpense} style={btnPrimary}>Save Expense</button>
+          {showExp&&(
+            <Modal title="Record Expense" onClose={()=>setShowExp(false)}>
+              <Row label="Description"><input value={expForm.description} onChange={e=>setExpForm(p=>({...p,description:e.target.value}))} style={inp}/></Row>
+              <Row label="Amount (GH₵)"><input type="number" value={expForm.amount} onChange={e=>setExpForm(p=>({...p,amount:e.target.value}))} style={inp}/></Row>
+              <Row label="Category"><select value={expForm.category} onChange={e=>setExpForm(p=>({...p,category:e.target.value}))} style={inp}>
+                {["Supplies","Utilities","Maintenance","Staff","Infrastructure","Events","ICT","Security","Other"].map(c=><option key={c}>{c}</option>)}
+              </select></Row>
+              <Row label="Date"><input type="date" value={expForm.date} onChange={e=>setExpForm(p=>({...p,date:e.target.value}))} style={inp}/></Row>
+              <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:12 }}>
+                <button onClick={()=>setShowExp(false)} style={btnS}>Cancel</button>
+                <button onClick={saveExp} style={btnP}>Save</button>
               </div>
-            </FormModal>
+            </Modal>
           )}
-          <div style={{ background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-              <thead><tr style={{ background:"#f8fafc" }}>
-                {["Description","Amount","Category","Date","Entered By"].map(h=>(
-                  <th key={h} style={{ padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#374151", borderBottom:"1px solid #e5e7eb" }}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {[...expenses].reverse().map(e=>(
-                  <tr key={e.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
-                    <td style={{ padding:"8px 12px", fontWeight:600 }}>{e.description}</td>
-                    <td style={{ padding:"8px 12px", color:"#d97706", fontWeight:600 }}>{formatGHS(e.amount)}</td>
-                    <td style={{ padding:"8px 12px" }}><span style={{ background:"#f1f5f9", padding:"2px 8px", borderRadius:8, fontSize:11 }}>{e.category}</span></td>
-                    <td style={{ padding:"8px 12px" }}>{e.date}</td>
-                    <td style={{ padding:"8px 12px", color:"#6b7280", fontSize:11 }}>{e.enteredBy}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table cols={["Description","Amount","Category","Date","By"]}
+            rows={[...expenses].reverse().map(e=>(
+              <tr key={e.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                <TD bold>{e.description}</TD>
+                <TD color="#d97706" bold>{formatGHS(e.amount)}</TD>
+                <td style={{ padding:"8px 12px" }}><Badge text={e.category} color="#374151" bg="#f1f5f9"/></td>
+                <TD>{e.date}</TD><TD small color="#6b7280">{e.enteredBy}</TD>
+              </tr>
+            ))} emptyMsg="No expenses."/>
         </>
       )}
 
       {tab==="report"&&(
         <div>
-          <div style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap" }}>
+          <div style={{ display:"flex",gap:6,marginBottom:16,flexWrap:"wrap" }}>
             {[["weekly","Weekly"],["monthly","Monthly"],["quarterly","Quarterly"],["yearly","Yearly"],["term1","Term 1"],["term2","Term 2"],["term3","Term 3"]].map(([k,l])=>(
-              <button key={k} onClick={()=>setReportPeriod(k)}
-                style={{ padding:"7px 16px", borderRadius:8, border:"none", cursor:"pointer", fontSize:12, fontWeight:600,
-                  background:reportPeriod===k?"#1e40af":"#e5e7eb", color:reportPeriod===k?"#fff":"#374151" }}>{l}</button>
+              <button key={k} onClick={()=>setPeriod(k)} style={{ padding:"7px 14px",borderRadius:8,border:"none",cursor:"pointer",fontWeight:600,fontSize:12,background:period===k?"#1e40af":"#e5e7eb",color:period===k?"#fff":"#374151" }}>{l}</button>
             ))}
           </div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))", gap:14, marginBottom:20 }}>
-            {[
-              { label:"Total Income", value:formatGHS(rep.fees), color:"#16a34a", icon:"📥", sub:`${rep.feeCount} payments` },
-              { label:"Total Expenses", value:formatGHS(rep.expenses), color:"#dc2626", icon:"📤", sub:`${rep.expCount} items` },
-              { label:"Net Balance", value:formatGHS(rep.fees-rep.expenses), color:(rep.fees-rep.expenses)>=0?"#0369a1":"#dc2626", icon:"🏦", sub:"Income - Expenses" },
-            ].map((s,i)=>(
-              <div key={i} style={{ background:"#fff", borderRadius:12, padding:20, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", borderLeft:`4px solid ${s.color}` }}>
-                <div style={{ fontSize:22, marginBottom:6 }}>{s.icon}</div>
-                <div style={{ fontSize:22, fontWeight:700, color:s.color }}>{s.value}</div>
-                <div style={{ fontSize:12, color:"#64748b" }}>{s.label}</div>
-                <div style={{ fontSize:11, color:"#9ca3af" }}>{s.sub}</div>
-              </div>
-            ))}
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:20 }}>
+            <StatCard icon="📥" label={`Income (${period})`} value={formatGHS(rep.income)} color="#16a34a" sub={`${rep.feeCount} payments`}/>
+            <StatCard icon="📤" label={`Expenses (${period})`} value={formatGHS(rep.expenses)} color="#dc2626" sub={`${rep.expCount} items`}/>
+            <StatCard icon="🏦" label="Net Balance" value={formatGHS(rep.income-rep.expenses)} color={(rep.income-rep.expenses)>=0?"#0369a1":"#dc2626"}/>
           </div>
-          <div style={{ background:"#fff", borderRadius:12, padding:20, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-            <h3 style={{ margin:"0 0 12px", fontSize:15 }}>Expense Breakdown</h3>
-            {["Supplies","Utilities","Maintenance","Staff","Infrastructure","Events","Other"].map(cat=>{
-              const total = expenses.filter(e=>e.category===cat).reduce((a,e)=>a+e.amount,0);
-              return total>0?(
-                <div key={cat} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid #f1f5f9", fontSize:13 }}>
-                  <span>{cat}</span>
-                  <span style={{ fontWeight:600 }}>{formatGHS(total)}</span>
-                </div>
-              ):null;
+          <Card style={{ padding:18 }}>
+            <h3 style={{ margin:"0 0 12px",fontSize:15 }}>Expense Breakdown</h3>
+            {["Supplies","Utilities","Maintenance","Staff","Infrastructure","Events","ICT","Security","Other"].map(cat=>{
+              const t=expenses.filter(e=>e.category===cat).reduce((a,e)=>a+e.amount,0);
+              return t>0?<div key={cat} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9",fontSize:13 }}><span>{cat}</span><span style={{ fontWeight:600 }}>{formatGHS(t)}</span></div>:null;
             })}
-          </div>
+          </Card>
         </div>
       )}
     </div>
   );
 }
 
-// ============================================================
-// LIBRARY
-// ============================================================
-function Library({ books, setBooks, borrows, setBorrows, students, users, currentUser, notify, addAudit }) {
-  const [tab, setTab]           = useState("books");
-  const [search, setSearch]     = useState("");
-  const [showBookForm, setShowBookForm] = useState(false);
-  const [editBookId, setEditBookId] = useState(null);
-  const [bookForm, setBookForm] = useState({ title:"", author:"", isbn:"", copies:1, available:1, category:"Textbook" });
-  const [borrowForm, setBorrowForm] = useState({ bookId:"", borrowerId:"", borrowerType:"Student", borrowDate:today(), dueDate:"" });
-  const [showBorrowForm, setShowBorrowForm] = useState(false);
+// ─── PAYROLL ─────────────────────────────────────────────────
+function Payroll({ payroll,setPayroll,users,curUser,notify,addAudit }) {
+  const [tab,setTab]=useState("process");
+  const [selStaff,setSelStaff]=useState("");
+  const [selMonth,setSelMonth]=useState("January"); const [selYear,setSelYear]=useState("2025");
+  const [showForm,setShowForm]=useState(false);
+  const months=["January","February","March","April","May","June","July","August","September","October","November","December"];
 
-  const filteredBooks = books.filter(b=>b.title.toLowerCase().includes(search.toLowerCase())||b.author.toLowerCase().includes(search.toLowerCase()));
-  const overdueList   = borrows.filter(b=>!b.returnDate&&b.dueDate<today());
+  const staff=users.filter(u=>u.active);
+  const su=staff.find(u=>u.id===selStaff);
 
-  const saveBook = () => {
-    if(!bookForm.title) { notify("Title required","error"); return; }
-    if(editBookId) {
-      setBooks(prev=>prev.map(b=>b.id===editBookId?{...b,...bookForm}:b));
-      addAudit(`Updated book: ${bookForm.title}`,"Library"); notify("Book updated");
-    } else {
-      setBooks(prev=>[...prev,{id:uid("BK"),...bookForm}]);
-      addAudit(`Added book: ${bookForm.title}`,"Library"); notify("Book added");
-    }
-    setShowBookForm(false); setEditBookId(null); setBookForm({ title:"", author:"", isbn:"", copies:1, available:1, category:"Textbook" });
+  const calcPayslip=(u,overTime=0,substitution=0,loans=0,absenceDays=0,responsibility=0)=>{
+    const base=u.salary||0; const transport=u.transport||0; const housing=u.housing||0;
+    const gross=base+transport+housing+responsibility+overTime+substitution;
+    const ssnitEmp=u.ssnit?(base*0.055):0;
+    const ssnitEr=u.ssnit?(base*0.13):0;
+    const dailyRate=base/22;
+    const absDeduct=absenceDays*dailyRate;
+    const paye=calcPAYE(gross-ssnitEmp);
+    const netPay=gross-ssnitEmp-paye-loans-absDeduct;
+    return { base,transport,housing,responsibility,overTime,substitution,gross,ssnitEmployee:Math.round(ssnitEmp*100)/100,ssnitEmployer:Math.round(ssnitEr*100)/100,paye:Math.round(paye*100)/100,loans,absenceDeductions:Math.round(absDeduct*100)/100,netPay:Math.round(netPay*100)/100 };
   };
 
-  const saveBorrow = () => {
-    if(!borrowForm.bookId||!borrowForm.borrowerId||!borrowForm.dueDate) { notify("All fields required","error"); return; }
-    const bk = books.find(b=>b.id===borrowForm.bookId);
-    if(!bk||bk.available<1) { notify("No copies available","error"); return; }
-    setBorrows(prev=>[...prev,{id:uid("BOR"),...borrowForm,returnDate:null,enteredBy:currentUser.code}]);
-    setBooks(prev=>prev.map(b=>b.id===borrowForm.bookId?{...b,available:b.available-1}:b));
-    addAudit(`Book borrowed: ${bk.title} by ${borrowForm.borrowerId}`,"Library");
-    setShowBorrowForm(false); setBorrowForm({ bookId:"", borrowerId:"", borrowerType:"Student", borrowDate:today(), dueDate:"" });
-    notify("Book borrowed ✅");
+  const [extras,setExtras]=useState({ overtime:0,substitution:0,loans:0,absenceDays:0,responsibility:0 });
+  const preview=su?calcPayslip(su,extras.overtime,extras.substitution,extras.loans,extras.absenceDays,extras.responsibility):null;
+
+  const processPayroll=()=>{
+    if(!selStaff||!preview){ notify("Select staff member","error"); return; }
+    const exists=payroll.find(p=>p.staffId===selStaff&&p.month===selMonth&&p.year===selYear);
+    if(exists){ notify("Payroll already processed for this period","error"); return; }
+    const entry={ id:uid("PAY"),staffId:selStaff,month:selMonth,year:selYear,...preview,status:"paid",processedBy:curUser.code,date:todayStr() };
+    setPayroll(p=>[...p,entry]);
+    addAudit(`Payroll: ${su?.name} ${selMonth} ${selYear}`,"Payroll");
+    notify("Payroll processed ✅"); setExtras({overtime:0,substitution:0,loans:0,absenceDays:0,responsibility:0});
   };
 
-  const returnBook = (borId) => {
-    const bor = borrows.find(b=>b.id===borId);
-    if(!bor) return;
-    setBorrows(prev=>prev.map(b=>b.id===borId?{...b,returnDate:today()}:b));
-    setBooks(prev=>prev.map(b=>b.id===bor.bookId?{...b,available:b.available+1}:b));
-    addAudit(`Book returned: ${borId}`,"Library"); notify("Book returned ✅");
-  };
+  const monthlyTotal=payroll.filter(p=>p.month===selMonth&&p.year===selYear);
+  const totalWageBill=monthlyTotal.reduce((a,p)=>a+(p.netPay||0),0);
+  const totalSSNIT=monthlyTotal.reduce((a,p)=>a+(p.ssnitEmployer||0),0);
 
   return (
     <div>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-        <h2 style={{ margin:0, fontSize:20, fontWeight:700, color:"#0f172a" }}>📚 Library</h2>
-        <div style={{ display:"flex", gap:8 }}>
-          <button onClick={()=>setTab("books")} style={{ ...btnSmall, background:tab==="books"?"#1e40af":"#e5e7eb", color:tab==="books"?"#fff":"#374151", padding:"8px 14px" }}>Books</button>
-          <button onClick={()=>setTab("borrows")} style={{ ...btnSmall, background:tab==="borrows"?"#1e40af":"#e5e7eb", color:tab==="borrows"?"#fff":"#374151", padding:"8px 14px" }}>Borrows</button>
-          {overdueList.length>0&&<span style={{ background:"#fee2e2", color:"#dc2626", borderRadius:12, padding:"6px 12px", fontSize:12, fontWeight:700 }}>⚠️ {overdueList.length} Overdue</span>}
+      <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>💼 Staff Payroll</h2>
+      <Tabs tabs={[{key:"process",label:"Process Payroll"},{key:"history",label:"Payroll History"},{key:"summary",label:"Monthly Summary"}]} active={tab} onChange={setTab}/>
+
+      {tab==="process"&&(
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
+          <div>
+            <Card style={{ padding:18,marginBottom:16 }}>
+              <h3 style={{ margin:"0 0 14px",fontSize:15 }}>Select Period & Staff</h3>
+              <Row label="Staff Member"><select value={selStaff} onChange={e=>{setSelStaff(e.target.value);setExtras({overtime:0,substitution:0,loans:0,absenceDays:0,responsibility:0});}} style={inp}>
+                <option value="">-- Select --</option>
+                {staff.map(u=><option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+              </select></Row>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                <Row label="Month"><select value={selMonth} onChange={e=>setSelMonth(e.target.value)} style={inp}>{months.map(m=><option key={m}>{m}</option>)}</select></Row>
+                <Row label="Year"><input value={selYear} onChange={e=>setSelYear(e.target.value)} style={inp}/></Row>
+              </div>
+            </Card>
+            {su&&(
+              <Card style={{ padding:18 }}>
+                <h3 style={{ margin:"0 0 14px",fontSize:15 }}>Adjustments</h3>
+                <Row label="Responsibility Allowance (GH₵)"><input type="number" value={extras.responsibility} onChange={e=>setExtras(p=>({...p,responsibility:+e.target.value}))} style={inp}/></Row>
+                <Row label="Overtime Pay (GH₵)"><input type="number" value={extras.overtime} onChange={e=>setExtras(p=>({...p,overtime:+e.target.value}))} style={inp}/></Row>
+                <Row label="Substitution Pay (GH₵)"><input type="number" value={extras.substitution} onChange={e=>setExtras(p=>({...p,substitution:+e.target.value}))} style={inp}/></Row>
+                <Row label="Days Absent (for deduction)"><input type="number" value={extras.absenceDays} onChange={e=>setExtras(p=>({...p,absenceDays:+e.target.value}))} style={inp}/></Row>
+                <Row label="Loan Deduction (GH₵)"><input type="number" value={extras.loans} onChange={e=>setExtras(p=>({...p,loans:+e.target.value}))} style={inp}/></Row>
+              </Card>
+            )}
+          </div>
+
+          {preview&&su&&(
+            <Card style={{ padding:20 }}>
+              <div style={{ textAlign:"center",marginBottom:16,borderBottom:"2px solid #e5e7eb",paddingBottom:12 }}>
+                <div style={{ fontSize:15,fontWeight:700 }}>PAYSLIP PREVIEW</div>
+                <div style={{ fontSize:13,color:"#64748b" }}>{su.name} | {selMonth} {selYear}</div>
+                <Badge text={su.role} color="#1d4ed8" bg="#dbeafe"/>
+              </div>
+              <div style={{ fontSize:13 }}>
+                <div style={{ background:"#f0fdf4",borderRadius:8,padding:10,marginBottom:10 }}>
+                  <div style={{ fontWeight:600,color:"#166534",marginBottom:6 }}>EARNINGS</div>
+                  {[["Base Salary",preview.base],["Transport Allowance",preview.transport],["Housing Allowance",preview.housing],["Responsibility Allow.",preview.responsibility],["Overtime",preview.overTime],["Substitution",preview.substitution]].map(([l,v])=>v>0?<div key={l} style={{ display:"flex",justifyContent:"space-between",padding:"3px 0" }}><span>{l}</span><span>{formatGHS(v)}</span></div>:null)}
+                  <div style={{ borderTop:"1px solid #bbf7d0",marginTop:6,paddingTop:6,display:"flex",justifyContent:"space-between",fontWeight:700 }}><span>Gross Pay</span><span>{formatGHS(preview.gross)}</span></div>
+                </div>
+                <div style={{ background:"#fef2f2",borderRadius:8,padding:10,marginBottom:10 }}>
+                  <div style={{ fontWeight:600,color:"#991b1b",marginBottom:6 }}>DEDUCTIONS</div>
+                  {[["SSNIT (5.5% employee)",preview.ssnitEmployee],["PAYE Tax",preview.paye],["Absence Deductions",preview.absenceDeductions],["Loan Repayment",preview.loans]].map(([l,v])=>v>0?<div key={l} style={{ display:"flex",justifyContent:"space-between",padding:"3px 0" }}><span>{l}</span><span style={{ color:"#dc2626" }}>-{formatGHS(v)}</span></div>:null)}
+                </div>
+                <div style={{ background:"#eff6ff",borderRadius:8,padding:12,textAlign:"center" }}>
+                  <div style={{ fontSize:12,color:"#1d4ed8" }}>NET PAY</div>
+                  <div style={{ fontSize:28,fontWeight:700,color:"#1e40af" }}>{formatGHS(preview.netPay)}</div>
+                  <div style={{ fontSize:11,color:"#6b7280" }}>SSNIT Employer contribution: {formatGHS(preview.ssnitEmployer)}</div>
+                </div>
+              </div>
+              <button onClick={processPayroll} style={{ ...btnP,width:"100%",marginTop:14 }}>✅ Process & Save Payroll</button>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {tab==="history"&&(
+        <Table cols={["Staff","Month","Year","Gross","Net Pay","SSNIT(Er)","PAYE","Status","By"]}
+          rows={[...payroll].reverse().map(p=>{ const u=users.find(x=>x.id===p.staffId); return (
+            <tr key={p.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+              <TD bold>{u?.name}</TD><TD>{p.month}</TD><TD>{p.year}</TD>
+              <TD>{formatGHS(p.gross)}</TD>
+              <TD bold color="#1e40af">{formatGHS(p.netPay)}</TD>
+              <TD small>{formatGHS(p.ssnitEmployer)}</TD>
+              <TD small>{formatGHS(p.paye)}</TD>
+              <td style={{ padding:"8px 12px" }}><Badge text={p.status} color="#166534" bg="#dcfce7"/></td>
+              <TD small color="#6b7280">{p.processedBy}</TD>
+            </tr>
+          );})} emptyMsg="No payroll records."/>
+      )}
+
+      {tab==="summary"&&(
+        <div>
+          <div style={{ display:"flex",gap:10,marginBottom:16 }}>
+            <select value={selMonth} onChange={e=>setSelMonth(e.target.value)} style={{ ...inp,width:150 }}>{months.map(m=><option key={m}>{m}</option>)}</select>
+            <input value={selYear} onChange={e=>setSelYear(e.target.value)} style={{ ...inp,width:100 }}/>
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:20 }}>
+            <StatCard icon="💼" label="Staff Paid" value={monthlyTotal.length} color="#3b82f6"/>
+            <StatCard icon="💰" label="Total Wage Bill" value={formatGHS(totalWageBill)} color="#1e40af"/>
+            <StatCard icon="🏛️" label="SSNIT (Employer)" value={formatGHS(totalSSNIT)} color="#7c3aed"/>
+          </div>
+          <Table cols={["Staff","Role","Base","Net Pay","SSNIT(Er)","PAYE"]}
+            rows={monthlyTotal.map(p=>{ const u=users.find(x=>x.id===p.staffId); return (
+              <tr key={p.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                <TD bold>{u?.name}</TD>
+                <td style={{ padding:"8px 12px" }}><Badge text={u?.role||""} color="#374151" bg="#f1f5f9"/></td>
+                <TD>{formatGHS(p.base)}</TD>
+                <TD bold color="#1e40af">{formatGHS(p.netPay)}</TD>
+                <TD small>{formatGHS(p.ssnitEmployer)}</TD>
+                <TD small>{formatGHS(p.paye)}</TD>
+              </tr>
+            );})} emptyMsg="No payroll for this period."/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── LIBRARY ─────────────────────────────────────────────────
+function Library({ books,setBooks,borrows,setBorrows,students,users,curUser,notify,addAudit }) {
+  const [tab,setTab]=useState("books");
+  const [search,setSearch]=useState("");
+  const [showBook,setShowBook]=useState(false); const [editBk,setEditBk]=useState(null);
+  const [showBorrow,setShowBorrow]=useState(false);
+  const bkBlank={ title:"",author:"",isbn:"",copies:1,available:1,category:"Textbook" };
+  const [bf,setBf]=useState(bkBlank);
+  const [borForm,setBorForm]=useState({ bookId:"",borrowerId:"",borrowerType:"Student",borrowDate:todayStr(),dueDate:"" });
+  const overdue=borrows.filter(b=>!b.returnDate&&b.dueDate<todayStr());
+
+  const saveBook=()=>{
+    if(!bf.title){ notify("Title required","error"); return; }
+    if(editBk){ setBooks(p=>p.map(b=>b.id===editBk?{...b,...bf}:b)); notify("Book updated"); }
+    else { setBooks(p=>[...p,{id:uid("BK"),...bf}]); addAudit(`Book added: ${bf.title}`,"Library"); notify("Book added"); }
+    setShowBook(false); setEditBk(null); setBf(bkBlank);
+  };
+
+  const saveBorrow=()=>{
+    if(!borForm.bookId||!borForm.borrowerId||!borForm.dueDate){ notify("All fields required","error"); return; }
+    const bk=books.find(b=>b.id===borForm.bookId);
+    if(!bk||bk.available<1){ notify("No copies available","error"); return; }
+    setBorrows(p=>[...p,{id:uid("BOR"),...borForm,returnDate:null,enteredBy:curUser.code}]);
+    setBooks(p=>p.map(b=>b.id===borForm.bookId?{...b,available:b.available-1}:b));
+    addAudit(`Borrowed: ${bk.title}`,"Library"); notify("Book issued ✅");
+    setShowBorrow(false); setBorForm({bookId:"",borrowerId:"",borrowerType:"Student",borrowDate:todayStr(),dueDate:""});
+  };
+
+  const returnBook=id=>{
+    const bor=borrows.find(b=>b.id===id); if(!bor) return;
+    setBorrows(p=>p.map(b=>b.id===id?{...b,returnDate:todayStr()}:b));
+    setBooks(p=>p.map(b=>b.id===bor.bookId?{...b,available:b.available+1}:b));
+    addAudit(`Returned: book ${id}`,"Library"); notify("Book returned ✅");
+  };
+
+  const filtered=books.filter(b=>b.title.toLowerCase().includes(search.toLowerCase())||b.author.toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+        <h2 style={{ margin:0,fontSize:20,fontWeight:700,color:"#0f172a" }}>📚 Library</h2>
+        <div style={{ display:"flex",gap:8 }}>
+          <Tabs tabs={[{key:"books",label:"Books"},{key:"borrows",label:"Borrows"}]} active={tab} onChange={setTab}/>
+          {overdue.length>0&&<Badge text={`${overdue.length} Overdue`} color="#991b1b" bg="#fee2e2"/>}
         </div>
       </div>
 
       {tab==="books"&&(
         <>
-          <div style={{ display:"flex", gap:10, marginBottom:14 }}>
-            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search books..."
-              style={{ flex:1, padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}/>
-            <button onClick={()=>{setShowBookForm(true);setEditBookId(null);setBookForm({ title:"", author:"", isbn:"", copies:1, available:1, category:"Textbook" });}} style={btnPrimary}>+ Add Book</button>
-            <button onClick={()=>setShowBorrowForm(true)} style={{ ...btnPrimary, background:"#059669" }}>📤 Issue Book</button>
+          <div style={{ display:"flex",gap:8,marginBottom:14 }}>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search books..." style={{ ...inp,flex:1 }}/>
+            <button onClick={()=>{setShowBook(true);setEditBk(null);setBf(bkBlank);}} style={btnP}>+ Add Book</button>
+            <button onClick={()=>setShowBorrow(true)} style={{ ...btnP,background:"#059669" }}>📤 Issue Book</button>
           </div>
-          {showBookForm&&(
-            <FormModal title={editBookId?"Edit Book":"Add Book"} onClose={()=>{setShowBookForm(false);setEditBookId(null);}}>
-              <FormRow label="Title"><input value={bookForm.title} onChange={e=>setBookForm(p=>({...p,title:e.target.value}))} style={inp}/></FormRow>
-              <FormRow label="Author"><input value={bookForm.author} onChange={e=>setBookForm(p=>({...p,author:e.target.value}))} style={inp}/></FormRow>
-              <FormRow label="ISBN"><input value={bookForm.isbn} onChange={e=>setBookForm(p=>({...p,isbn:e.target.value}))} style={inp}/></FormRow>
-              <FormRow label="Total Copies"><input type="number" value={bookForm.copies} onChange={e=>setBookForm(p=>({...p,copies:+e.target.value,available:+e.target.value}))} style={inp}/></FormRow>
-              <FormRow label="Category">
-                <select value={bookForm.category} onChange={e=>setBookForm(p=>({...p,category:e.target.value}))} style={inp}>
-                  {["Textbook","Reference","Fiction","Library","Magazine","Other"].map(c=><option key={c}>{c}</option>)}
-                </select>
-              </FormRow>
-              <div style={{ display:"flex", justifyContent:"flex-end", gap:10, marginTop:16 }}>
-                <button onClick={()=>{setShowBookForm(false);setEditBookId(null);}} style={btnSecondary}>Cancel</button>
-                <button onClick={saveBook} style={btnPrimary}>Save</button>
+          {showBook&&(
+            <Modal title={editBk?"Edit Book":"Add Book"} onClose={()=>{setShowBook(false);setEditBk(null);}}>
+              <Row label="Title"><input value={bf.title} onChange={e=>setBf(p=>({...p,title:e.target.value}))} style={inp}/></Row>
+              <Row label="Author"><input value={bf.author} onChange={e=>setBf(p=>({...p,author:e.target.value}))} style={inp}/></Row>
+              <Row label="ISBN"><input value={bf.isbn} onChange={e=>setBf(p=>({...p,isbn:e.target.value}))} style={inp}/></Row>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                <Row label="Total Copies"><input type="number" value={bf.copies} onChange={e=>setBf(p=>({...p,copies:+e.target.value,available:+e.target.value}))} style={inp}/></Row>
+                <Row label="Category"><select value={bf.category} onChange={e=>setBf(p=>({...p,category:e.target.value}))} style={inp}>{["Textbook","Reference","Fiction","Library","Magazine","Other"].map(c=><option key={c}>{c}</option>)}</select></Row>
               </div>
-            </FormModal>
+              <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:12 }}><button onClick={()=>{setShowBook(false);setEditBk(null);}} style={btnS}>Cancel</button><button onClick={saveBook} style={btnP}>Save</button></div>
+            </Modal>
           )}
-          {showBorrowForm&&(
-            <FormModal title="Issue Book" onClose={()=>setShowBorrowForm(false)}>
-              <FormRow label="Book">
-                <select value={borrowForm.bookId} onChange={e=>setBorrowForm(p=>({...p,bookId:e.target.value}))} style={inp}>
-                  <option value="">Select book</option>
-                  {books.filter(b=>b.available>0).map(b=><option key={b.id} value={b.id}>{b.title} ({b.available} avail.)</option>)}
-                </select>
-              </FormRow>
-              <FormRow label="Borrower Type">
-                <select value={borrowForm.borrowerType} onChange={e=>setBorrowForm(p=>({...p,borrowerType:e.target.value,borrowerId:""}))} style={inp}>
-                  <option>Student</option><option>Staff</option>
-                </select>
-              </FormRow>
-              <FormRow label="Borrower">
-                <select value={borrowForm.borrowerId} onChange={e=>setBorrowForm(p=>({...p,borrowerId:e.target.value}))} style={inp}>
-                  <option value="">Select</option>
-                  {(borrowForm.borrowerType==="Student"?students.filter(s=>s.status==="active"):users.filter(u=>u.active)).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}
-                </select>
-              </FormRow>
-              <FormRow label="Borrow Date"><input type="date" value={borrowForm.borrowDate} onChange={e=>setBorrowForm(p=>({...p,borrowDate:e.target.value}))} style={inp}/></FormRow>
-              <FormRow label="Due Date"><input type="date" value={borrowForm.dueDate} onChange={e=>setBorrowForm(p=>({...p,dueDate:e.target.value}))} style={inp}/></FormRow>
-              <div style={{ display:"flex", justifyContent:"flex-end", gap:10, marginTop:16 }}>
-                <button onClick={()=>setShowBorrowForm(false)} style={btnSecondary}>Cancel</button>
-                <button onClick={saveBorrow} style={btnPrimary}>Issue</button>
+          {showBorrow&&(
+            <Modal title="Issue Book" onClose={()=>setShowBorrow(false)}>
+              <Row label="Book"><select value={borForm.bookId} onChange={e=>setBorForm(p=>({...p,bookId:e.target.value}))} style={inp}><option value="">Select</option>{books.filter(b=>b.available>0).map(b=><option key={b.id} value={b.id}>{b.title} ({b.available} avail.)</option>)}</select></Row>
+              <Row label="Borrower Type"><select value={borForm.borrowerType} onChange={e=>setBorForm(p=>({...p,borrowerType:e.target.value,borrowerId:""}))} style={inp}><option>Student</option><option>Staff</option></select></Row>
+              <Row label="Borrower"><select value={borForm.borrowerId} onChange={e=>setBorForm(p=>({...p,borrowerId:e.target.value}))} style={inp}><option value="">Select</option>{(borForm.borrowerType==="Student"?students.filter(s=>s.status==="active"):users.filter(u=>u.active)).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></Row>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                <Row label="Borrow Date"><input type="date" value={borForm.borrowDate} onChange={e=>setBorForm(p=>({...p,borrowDate:e.target.value}))} style={inp}/></Row>
+                <Row label="Due Date"><input type="date" value={borForm.dueDate} onChange={e=>setBorForm(p=>({...p,dueDate:e.target.value}))} style={inp}/></Row>
               </div>
-            </FormModal>
+              <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:12 }}><button onClick={()=>setShowBorrow(false)} style={btnS}>Cancel</button><button onClick={saveBorrow} style={btnP}>Issue</button></div>
+            </Modal>
           )}
-          <div style={{ background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-              <thead><tr style={{ background:"#f8fafc" }}>
-                {["Title","Author","ISBN","Category","Total","Available","Actions"].map(h=>(
-                  <th key={h} style={{ padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#374151", borderBottom:"1px solid #e5e7eb" }}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {filteredBooks.map(b=>(
-                  <tr key={b.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
-                    <td style={{ padding:"8px 12px", fontWeight:600 }}>{b.title}</td>
-                    <td style={{ padding:"8px 12px" }}>{b.author}</td>
-                    <td style={{ padding:"8px 12px", color:"#6b7280", fontSize:11 }}>{b.isbn}</td>
-                    <td style={{ padding:"8px 12px" }}><span style={{ background:"#f1f5f9", padding:"2px 8px", borderRadius:8, fontSize:11 }}>{b.category}</span></td>
-                    <td style={{ padding:"8px 12px" }}>{b.copies}</td>
-                    <td style={{ padding:"8px 12px" }}><span style={{ background:b.available>0?"#dcfce7":"#fee2e2", color:b.available>0?"#166534":"#991b1b", padding:"2px 8px", borderRadius:10, fontWeight:600, fontSize:12 }}>{b.available}</span></td>
-                    <td style={{ padding:"8px 12px" }}>
-                      <button onClick={()=>{setEditBookId(b.id);setBookForm({title:b.title,author:b.author,isbn:b.isbn,copies:b.copies,available:b.available,category:b.category});setShowBookForm(true);}}
-                        style={{ ...btnSmall, background:"#dbeafe", color:"#1d4ed8" }}>Edit</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table cols={["Title","Author","ISBN","Category","Total","Available","Actions"]}
+            rows={filtered.map(b=>(
+              <tr key={b.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                <TD bold>{b.title}</TD><TD>{b.author}</TD><TD small color="#6b7280">{b.isbn}</TD>
+                <td style={{ padding:"8px 12px" }}><Badge text={b.category} color="#374151" bg="#f1f5f9"/></td>
+                <TD>{b.copies}</TD>
+                <td style={{ padding:"8px 12px" }}><Badge text={String(b.available)} color={b.available>0?"#166534":"#991b1b"} bg={b.available>0?"#dcfce7":"#fee2e2"}/></td>
+                <td style={{ padding:"8px 12px" }}><button onClick={()=>{setEditBk(b.id);setBf({title:b.title,author:b.author,isbn:b.isbn,copies:b.copies,available:b.available,category:b.category});setShowBook(true);}} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8" }}>Edit</button></td>
+              </tr>
+            ))} emptyMsg="No books."/>
         </>
       )}
 
       {tab==="borrows"&&(
-        <div style={{ background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-            <thead><tr style={{ background:"#f8fafc" }}>
-              {["Book","Borrower","Borrow Date","Due Date","Status","Actions"].map(h=>(
-                <th key={h} style={{ padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#374151", borderBottom:"1px solid #e5e7eb" }}>{h}</th>
-              ))}
-            </tr></thead>
-            <tbody>
-              {[...borrows].reverse().map(bor=>{
-                const bk  = books.find(b=>b.id===bor.bookId);
-                const brw = bor.borrowerType==="Student"?students.find(s=>s.id===bor.borrowerId):users.find(u=>u.id===bor.borrowerId);
-                const overdue = !bor.returnDate && bor.dueDate < today();
-                return (
-                  <tr key={bor.id} style={{ borderBottom:"1px solid #f1f5f9", background:overdue?"#fff7f0":"#fff" }}>
-                    <td style={{ padding:"8px 12px", fontWeight:600 }}>{bk?.title||"Unknown"}</td>
-                    <td style={{ padding:"8px 12px" }}>{brw?.name||bor.borrowerId} ({bor.borrowerType})</td>
-                    <td style={{ padding:"8px 12px" }}>{bor.borrowDate}</td>
-                    <td style={{ padding:"8px 12px", color:overdue?"#dc2626":"inherit", fontWeight:overdue?700:400 }}>{bor.dueDate}{overdue?" ⚠️":""}</td>
-                    <td style={{ padding:"8px 12px" }}>
-                      {bor.returnDate
-                        ? <span style={{ background:"#dcfce7", color:"#166534", padding:"2px 8px", borderRadius:10, fontSize:11 }}>Returned {bor.returnDate}</span>
-                        : <span style={{ background:overdue?"#fee2e2":"#fef3c7", color:overdue?"#991b1b":"#92400e", padding:"2px 8px", borderRadius:10, fontSize:11 }}>{overdue?"OVERDUE":"Borrowed"}</span>
-                      }
-                    </td>
-                    <td style={{ padding:"8px 12px" }}>
-                      {!bor.returnDate&&<button onClick={()=>returnBook(bor.id)} style={{ ...btnSmall, background:"#dcfce7", color:"#166534" }}>Return</button>}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <Table cols={["Book","Borrower","Type","Borrow Date","Due Date","Status","Action"]}
+          rows={[...borrows].reverse().map(bor=>{
+            const bk=books.find(b=>b.id===bor.bookId);
+            const brw=bor.borrowerType==="Student"?students.find(s=>s.id===bor.borrowerId):users.find(u=>u.id===bor.borrowerId);
+            const od=!bor.returnDate&&bor.dueDate<todayStr();
+            return (
+              <tr key={bor.id} style={{ borderBottom:"1px solid #f1f5f9",background:od?"#fff7f0":"#fff" }}>
+                <TD bold>{bk?.title}</TD><TD>{brw?.name}</TD>
+                <td style={{ padding:"8px 12px" }}><Badge text={bor.borrowerType} color="#374151" bg="#f1f5f9"/></td>
+                <TD small>{bor.borrowDate}</TD>
+                <TD small color={od?"#dc2626":"inherit"}>{bor.dueDate}{od?" ⚠️":""}</TD>
+                <td style={{ padding:"8px 12px" }}>
+                  {bor.returnDate?<Badge text={`Returned ${bor.returnDate}`} color="#166534" bg="#dcfce7"/>:
+                    <Badge text={od?"OVERDUE":"Borrowed"} color={od?"#991b1b":"#92400e"} bg={od?"#fee2e2":"#fef3c7"}/>}
+                </td>
+                <td style={{ padding:"8px 12px" }}>
+                  {!bor.returnDate&&<button onClick={()=>returnBook(bor.id)} style={{ ...btnSm,background:"#dcfce7",color:"#166534" }}>Return</button>}
+                </td>
+              </tr>
+            );
+          })} emptyMsg="No borrow records."/>
       )}
     </div>
   );
 }
 
-// ============================================================
-// TIMETABLE
-// ============================================================
-function Timetable({ timetables, currentUser, classes }) {
-  const isTeacher = currentUser?.role==="Teacher";
-  const myClass   = isTeacher ? currentUser?.classAssigned : null;
-  const [selClass, setSelClass] = useState(myClass||"Class 6A");
-  const tt = timetables[selClass];
-  const dayColors = ["#eff6ff","#f0fdf4","#fefce8","#fdf2f8","#f0fdfa"];
+// ─── TIMETABLE ───────────────────────────────────────────────
+function Timetable({ timetables,setTimetables,curUser }) {
+  const isTeacher=curUser?.role==="Teacher"; const myClass=isTeacher?curUser?.classAssigned:null;
+  const [selClass,setSelClass]=useState(myClass||"Class 6A");
+  const [editMode,setEditMode]=useState(false);
+  const [editCell,setEditCell]=useState(null); // {dayIdx,periodIdx}
+  const [editVal,setEditVal]=useState("");
+  const tt=timetables[selClass];
+  const dayColors=["#eff6ff","#f0fdf4","#fefce8","#fdf2f8","#f0fdfa"];
+
+  const saveCell=()=>{
+    if(!editCell) return;
+    setTimetables(prev=>{
+      const newTT={...prev};
+      const days=[...(newTT[selClass]||[])];
+      const day={...days[editCell.dayIdx]};
+      const periods=[...day.periods];
+      periods[editCell.periodIdx]={...periods[editCell.periodIdx],subject:editVal};
+      days[editCell.dayIdx]={...day,periods};
+      newTT[selClass]=days;
+      return newTT;
+    });
+    setEditCell(null); setEditVal("");
+  };
 
   return (
     <div>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-        <h2 style={{ margin:0, fontSize:20, fontWeight:700, color:"#0f172a" }}>📅 Timetable</h2>
-        {!isTeacher&&<select value={selClass} onChange={e=>setSelClass(e.target.value)} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}>
-          {Object.keys(timetables).map(c=><option key={c}>{c}</option>)}
-        </select>}
-        {isTeacher&&<div style={{ padding:"8px 14px", background:"#dbeafe", borderRadius:8, fontSize:13, color:"#1d4ed8", fontWeight:600 }}>📌 {selClass}</div>}
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+        <h2 style={{ margin:0,fontSize:20,fontWeight:700,color:"#0f172a" }}>📅 Timetable</h2>
+        <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+          {!isTeacher&&<select value={selClass} onChange={e=>setSelClass(e.target.value)} style={{ ...inp,width:160 }}>{Object.keys(timetables).map(c=><option key={c}>{c}</option>)}</select>}
+          {isTeacher&&<div style={{ padding:"8px 14px",background:"#dbeafe",borderRadius:8,fontSize:13,color:"#1d4ed8",fontWeight:600 }}>📌 {selClass}</div>}
+          {!isTeacher&&<button onClick={()=>setEditMode(!editMode)} style={{ ...editMode?{...btnS}:btnP,padding:"8px 14px" }}>{editMode?"✅ Done Editing":"✏️ Edit Timetable"}</button>}
+        </div>
       </div>
-      {tt ? (
+      {tt?(
         <div style={{ overflowX:"auto" }}>
-          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-            <thead>
-              <tr style={{ background:"#0f172a" }}>
-                <th style={{ padding:"10px 12px", color:"#94a3b8", textAlign:"left", fontSize:13 }}>Time</th>
-                {tt.map((d,i)=><th key={d.day} style={{ padding:"10px 12px", color:"#fff", textAlign:"center", fontSize:13 }}>{d.day}</th>)}
-              </tr>
-            </thead>
+          <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12,background:"#fff",borderRadius:12,overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
+            <thead><tr style={{ background:"#0f172a" }}>
+              <th style={{ padding:"10px 12px",color:"#94a3b8",textAlign:"left",fontSize:13,minWidth:100 }}>Time</th>
+              {tt.map(d=><th key={d.day} style={{ padding:"10px 12px",color:"#fff",textAlign:"center",fontSize:13,minWidth:110 }}>{d.day}</th>)}
+            </tr></thead>
             <tbody>
               {tt[0].periods.map((p,pi)=>(
                 <tr key={pi} style={{ borderBottom:"1px solid #f1f5f9" }}>
-                  <td style={{ padding:"8px 12px", fontWeight:600, color:"#374151", fontSize:12, whiteSpace:"nowrap", background:"#f8fafc" }}>{p.time}</td>
+                  <td style={{ padding:"8px 12px",fontWeight:600,color:"#374151",background:"#f8fafc",whiteSpace:"nowrap" }}>{p.time}</td>
                   {tt.map((d,di)=>{
-                    const per = d.periods[pi];
-                    const isBreak = per.subject==="Break"||per.subject==="Lunch";
+                    const per=d.periods[pi];
+                    const isBreak=per.subject==="Break"||per.subject==="Lunch";
+                    const isEditing=editMode&&editCell?.dayIdx===di&&editCell?.periodIdx===pi;
                     return (
-                      <td key={di} style={{ padding:"8px 10px", textAlign:"center", background:isBreak?"#f1f5f9":dayColors[di%5] }}>
-                        <span style={{ fontSize:12, fontWeight:isBreak?400:600, color:isBreak?"#9ca3af":"#0f172a" }}>{per.subject}</span>
+                      <td key={di} style={{ padding:"6px 10px",textAlign:"center",background:isBreak?"#f1f5f9":dayColors[di%5],cursor:editMode&&!isBreak?"pointer":"default" }}
+                        onClick={()=>{ if(editMode&&!isBreak){ setEditCell({dayIdx:di,periodIdx:pi}); setEditVal(per.subject); }}}>
+                        {isEditing?(
+                          <div onClick={e=>e.stopPropagation()}>
+                            <input value={editVal} onChange={e=>setEditVal(e.target.value)} style={{ width:"90%",padding:"3px 6px",borderRadius:4,border:"1px solid #93c5fd",fontSize:11 }}
+                              onKeyDown={e=>{ if(e.key==="Enter") saveCell(); if(e.key==="Escape"){ setEditCell(null);setEditVal(""); }}} autoFocus/>
+                          </div>
+                        ):(
+                          <span style={{ fontSize:12,fontWeight:isBreak?400:600,color:isBreak?"#9ca3af":"#0f172a" }}>{per.subject}</span>
+                        )}
                       </td>
                     );
                   })}
@@ -1367,167 +1755,381 @@ function Timetable({ timetables, currentUser, classes }) {
             </tbody>
           </table>
         </div>
-      ) : <p style={{ color:"#9ca3af" }}>No timetable found for {selClass}.</p>}
+      ):<div style={{ textAlign:"center",color:"#9ca3af",padding:40 }}>No timetable for {selClass}. Select a class with a timetable or add one.</div>}
+      {editMode&&<p style={{ fontSize:12,color:"#64748b",marginTop:8 }}>Click any cell to edit. Press Enter to save, Escape to cancel.</p>}
     </div>
   );
 }
 
-// ============================================================
-// REPORTS
-// ============================================================
-function Reports({ students, grades, attendance, fees, expenses, classes, subjects, school }) {
-  const [reportType, setReportType] = useState("student");
-  const [selClass, setSelClass]     = useState(classes[0]);
-  const [selStudent, setSelStudent] = useState("");
-  const [selTerm, setSelTerm]       = useState("Term 1");
-  const [selYear, setSelYear]       = useState("2024/2025");
+// ─── COMMUNICATION ───────────────────────────────────────────
+function Communication({ students,school,curUser,fees,attendance }) {
+  const [tab,setTab]=useState("whatsapp");
+  const [templateType,setTemplateType]=useState("fee_reminder");
+  const [selStu,setSelStu]=useState("");
+  const [selClass,setSelClass]=useState("");
+  const [preview,setPreview]=useState("");
+  const [letterType,setLetterType]=useState("arrears");
 
-  const classStudents = students.filter(s=>s.status==="active"&&s.class===selClass);
+  const activeStudents=students.filter(s=>s.status==="active");
+  const classStudents=selClass?activeStudents.filter(s=>s.class===selClass):activeStudents;
+  const selStudent=students.find(s=>s.id===selStu);
 
-  const studentGrades = (sid, term, year) => grades.filter(g=>g.studentId===sid&&g.term===term&&g.year===year);
-  const avg = (gArr) => gArr.length ? Math.round(gArr.reduce((a,g)=>a+g.score,0)/gArr.length) : 0;
+  const templates = {
+    fee_reminder: (s) => `Dear ${s?.guardian||"Parent/Guardian"},
 
-  const attRate = (sid) => {
-    const total = attendance.filter(a=>a.studentId===sid);
-    const present = total.filter(a=>a.status==="Present");
-    return total.length ? Math.round((present.length/total.length)*100) : 100;
+This is a friendly reminder from ${school.name} that the school fees for *${s?.name}* (${s?.class}) for ${school.currentTerm} ${school.currentYear} are outstanding.
+
+• Total Fees: ${formatGHS(s?.fees||0)}
+• Amount Paid: ${formatGHS(s?.paid||0)}
+• Balance Due: *${formatGHS((s?.fees||0)-(s?.paid||0))}*
+
+Kindly make payment at your earliest convenience to avoid any disruption to your child's schooling.
+
+Thank you.
+${school.name}
+${school.phone}`,
+
+    absence_alert: (s) => {
+      const absences=attendance.filter(a=>a.studentId===s?.id&&a.status==="Absent").length;
+      return `Dear ${s?.guardian||"Parent/Guardian"},
+
+We wish to bring to your attention that *${s?.name}* (${s?.class}) has been absent from school *${absences} time(s)* this term.
+
+Regular attendance is essential for your child's academic progress. Please ensure your child attends school regularly. If there is a health or personal reason, kindly notify the school.
+
+Please contact us to discuss: ${school.phone}
+
+Regards,
+${school.name}`;
+    },
+
+    report_ready: (s) => `Dear ${s?.guardian||"Parent/Guardian"},
+
+The academic report for *${s?.name}* (${s?.class}) for ${school.currentTerm} ${school.currentYear} is ready for collection.
+
+Kindly visit the school to collect the report card. Please bring this message as confirmation.
+
+School hours: Monday – Friday, 7:30am – 3:00pm
+
+${school.name}
+${school.phone}`,
+
+    exam_notice: (s) => `Dear ${s?.guardian||"Parent/Guardian"},
+
+End of term examinations for *${s?.name}* (${s?.class}) are scheduled to begin soon.
+
+Please ensure your child:
+✅ Reports to school on time
+✅ Brings all necessary stationery
+✅ Has paid all outstanding fees before the exam period
+
+For the full exam timetable, please contact the school.
+
+${school.name}
+${school.phone}`,
+
+    pta_invite: (s) => `Dear ${s?.guardian||"Parent/Guardian"},
+
+You are cordially invited to the Parent-Teacher Association (PTA) Meeting for ${school.currentTerm} ${school.currentYear}.
+
+This is an important meeting to discuss your child's progress and the school's development plans. Your attendance is highly encouraged.
+
+Date: ____________
+Time: ____________
+Venue: ${school.name}
+
+We look forward to seeing you.
+
+${school.name}
+${school.phone}`,
   };
+
+  const getPreview = () => {
+    const s = selStudent;
+    if (!s && templateType!=="pta_invite") { setPreview("Select a student first."); return; }
+    const fn = templates[templateType];
+    setPreview(fn ? fn(s||{name:"[Student Name]",class:"[Class]",guardian:"Parent/Guardian",fees:0,paid:0}) : "");
+  };
+
+  const genAllMessages = () => {
+    return classStudents.map(s=>`--- ${s.name} (${s.class}) ---\n${templates[templateType]?.(s)||""}`).join("\n\n========================================\n\n");
+  };
+
+  const letterTemplates = {
+    arrears: (s) => `${school.name}
+${school.address}
+Tel: ${school.phone} | Email: ${school.email}
+Date: ${todayStr()}
+
+${s?.guardian||"Parent/Guardian"}
+[Address]
+
+Dear Parent/Guardian,
+
+RE: OUTSTANDING SCHOOL FEES — ${s?.name?.toUpperCase()||"STUDENT NAME"} (${s?.class})
+
+We write to formally notify you that the school fees for your ward, ${s?.name||"[Name]"}, for ${school.currentTerm} ${school.currentYear} remain outstanding as follows:
+
+Total Fees: ${formatGHS(s?.fees||0)}
+Amount Paid: ${formatGHS(s?.paid||0)}
+BALANCE DUE: ${formatGHS((s?.fees||0)-(s?.paid||0))}
+
+We kindly request that this balance be settled within FIVE (5) working days of the date of this letter to avoid disruption to your ward's education.
+
+Yours faithfully,
+
+_________________________
+${school.principalName||"The Principal"}
+${school.name}`,
+
+    disciplinary: (s) => `${school.name}
+${school.address}
+Date: ${todayStr()}
+
+${s?.guardian||"Parent/Guardian"}
+
+Dear Parent/Guardian,
+
+RE: DISCIPLINARY NOTICE — ${s?.name?.toUpperCase()||"STUDENT NAME"}
+
+We wish to bring to your attention a matter regarding the conduct of your ward, ${s?.name||"[Name]"} (${s?.class}), at this school.
+
+[Describe incident here]
+
+We request that you visit the school on ____________ at ____________ to discuss this matter with the headmaster.
+
+Yours faithfully,
+
+_________________________
+${school.principalName||"The Principal"}`,
+  };
+
+  const [letterPreview,setLetterPreview]=useState("");
 
   return (
     <div>
-      <h2 style={{ margin:"0 0 16px", fontSize:20, fontWeight:700, color:"#0f172a" }}>📋 Reports</h2>
-      <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
-        {["student","class","subject"].map(t=>(
-          <button key={t} onClick={()=>setReportType(t)} style={{ padding:"8px 18px", borderRadius:8, border:"none", cursor:"pointer", fontWeight:600, fontSize:13, background:reportType===t?"#1e40af":"#e5e7eb", color:reportType===t?"#fff":"#374151" }}>
-            {t==="student"?"Student Report":t==="class"?"Class Report":"Subject Analysis"}
-          </button>
-        ))}
-      </div>
+      <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>💬 Parent Communication</h2>
+      <Tabs tabs={[{key:"whatsapp",label:"💬 WhatsApp Templates"},{key:"letters",label:"📄 Printed Letters"}]} active={tab} onChange={setTab}/>
 
-      {reportType==="student"&&(
-        <div>
-          <div style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap" }}>
-            <select value={selClass} onChange={e=>{setSelClass(e.target.value);setSelStudent("");}} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}>
-              {classes.map(c=><option key={c}>{c}</option>)}
-            </select>
-            <select value={selStudent} onChange={e=>setSelStudent(e.target.value)} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}>
+      {tab==="whatsapp"&&(
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
+          <Card style={{ padding:18 }}>
+            <h3 style={{ margin:"0 0 14px",fontSize:15 }}>Message Settings</h3>
+            <Row label="Template Type"><select value={templateType} onChange={e=>setTemplateType(e.target.value)} style={inp}>
+              <option value="fee_reminder">Fee Reminder</option>
+              <option value="absence_alert">Absence Alert</option>
+              <option value="report_ready">Report Card Ready</option>
+              <option value="exam_notice">Exam Notice</option>
+              <option value="pta_invite">PTA Invitation</option>
+            </select></Row>
+            <Row label="For Single Student (optional)"><select value={selStu} onChange={e=>setSelStu(e.target.value)} style={inp}>
+              <option value="">All / Broadcast</option>
+              {activeStudents.map(s=><option key={s.id} value={s.id}>{s.name} — {s.class}</option>)}
+            </select></Row>
+            <Row label="Filter by Class (for broadcast)"><select value={selClass} onChange={e=>setSelClass(e.target.value)} style={inp}>
+              <option value="">All Classes</option>
+              {CLASSES.map(c=><option key={c}>{c}</option>)}
+            </select></Row>
+            <div style={{ display:"flex",gap:8,marginTop:8 }}>
+              <button onClick={getPreview} style={{ ...btnP,flex:1 }}>👁️ Preview</button>
+              {!selStu&&<button onClick={()=>setPreview(genAllMessages())} style={{ ...btnP,flex:1,background:"#059669" }}>📋 Generate All</button>}
+            </div>
+          </Card>
+          <Card style={{ padding:18 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+              <h3 style={{ margin:0,fontSize:15 }}>Message Preview</h3>
+              {preview&&<button onClick={()=>{navigator.clipboard?.writeText(preview);}} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8",padding:"5px 12px" }}>📋 Copy</button>}
+            </div>
+            {preview?(
+              <pre style={{ background:"#f8fafc",borderRadius:10,padding:16,fontSize:12,lineHeight:1.7,whiteSpace:"pre-wrap",margin:0,color:"#374151",maxHeight:400,overflowY:"auto",fontFamily:"inherit" }}>{preview}</pre>
+            ):<div style={{ textAlign:"center",color:"#9ca3af",padding:40 }}>Select a template and click Preview</div>}
+            {preview&&<p style={{ fontSize:11,color:"#94a3b8",marginTop:8 }}>Copy this message and paste into WhatsApp. For broadcast, scroll through each student's message.</p>}
+          </Card>
+        </div>
+      )}
+
+      {tab==="letters"&&(
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
+          <Card style={{ padding:18 }}>
+            <h3 style={{ margin:"0 0 14px",fontSize:15 }}>Letter Settings</h3>
+            <Row label="Letter Type"><select value={letterType} onChange={e=>setLetterType(e.target.value)} style={inp}>
+              <option value="arrears">Fee Arrears Notice</option>
+              <option value="disciplinary">Disciplinary Notice</option>
+            </select></Row>
+            <Row label="Student"><select value={selStu} onChange={e=>setSelStu(e.target.value)} style={inp}>
               <option value="">Select student</option>
-              {classStudents.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}>
-              <option>Term 1</option><option>Term 2</option><option>Term 3</option>
-            </select>
+              {activeStudents.map(s=><option key={s.id} value={s.id}>{s.name} — {s.class}</option>)}
+            </select></Row>
+            <div style={{ display:"flex",gap:8,marginTop:8 }}>
+              <button onClick={()=>setLetterPreview((letterTemplates[letterType]||letterTemplates.arrears)(selStudent||{name:"[Name]",class:"[Class]",guardian:"Parent/Guardian",fees:0,paid:0}))} style={{ ...btnP,flex:1 }}>👁️ Preview Letter</button>
+              {letterPreview&&<button onClick={()=>window.print()} style={{ ...btnP,flex:1,background:"#059669" }}>🖨️ Print</button>}
+            </div>
+          </Card>
+          <Card style={{ padding:18 }}>
+            <h3 style={{ margin:"0 0 10px",fontSize:15 }}>Letter Preview</h3>
+            {letterPreview?(
+              <pre style={{ background:"#fff",borderRadius:10,padding:16,fontSize:12,lineHeight:1.9,whiteSpace:"pre-wrap",margin:0,color:"#0f172a",maxHeight:450,overflowY:"auto",fontFamily:"'Courier New',monospace",border:"1px solid #e5e7eb" }}>{letterPreview}</pre>
+            ):<div style={{ textAlign:"center",color:"#9ca3af",padding:40 }}>Select letter type and student, then preview</div>}
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── REPORTS ─────────────────────────────────────────────────
+function Reports({ students,grades,attendance,fees,expenses,school }) {
+  const [rt,setRt]=useState("student");
+  const [sc,setSc]=useState(CLASSES[5]); const [ss,setSs]=useState(""); const [st,setSt]=useState("Term 1");
+
+  const classStu=students.filter(s=>s.status==="active"&&s.class===sc);
+  const sg=(sid,term)=>grades.filter(g=>g.studentId===sid&&g.term===term);
+  const avg=arr=>arr.length?Math.round(arr.reduce((a,g)=>a+g.score,0)/arr.length):0;
+  const attRate=sid=>{ const all=attendance.filter(a=>a.studentId===sid); return all.length?Math.round(attendance.filter(a=>a.studentId===sid&&a.status==="Present").length/all.length*100):100; };
+  const gradeColor=g=>g==="A"?"#16a34a":g==="B"?"#0369a1":g==="C"?"#d97706":"#dc2626";
+
+  return (
+    <div>
+      <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>📋 Reports</h2>
+      <Tabs tabs={[{key:"student",label:"Student Report Card"},{key:"class",label:"Class Report"},{key:"subject",label:"Subject Analysis"},{key:"school",label:"School Dashboard"}]} active={rt} onChange={setRt}/>
+
+      {rt==="student"&&(
+        <div>
+          <div style={{ display:"flex",gap:8,marginBottom:14,flexWrap:"wrap" }}>
+            <select value={sc} onChange={e=>{setSc(e.target.value);setSs("");}} style={{ ...inp,width:160 }}>{CLASSES.map(c=><option key={c}>{c}</option>)}</select>
+            <select value={ss} onChange={e=>setSs(e.target.value)} style={{ ...inp,width:220 }}><option value="">Select student</option>{classStu.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select>
+            <select value={st} onChange={e=>setSt(e.target.value)} style={{ ...inp,width:120 }}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
           </div>
-          {selStudent&&(()=>{
-            const stu=students.find(s=>s.id===selStudent);
-            const sg=studentGrades(selStudent,selTerm,selYear);
-            const av=avg(sg);
-            const att=attRate(selStudent);
+          {ss&&(()=>{
+            const stu=students.find(s=>s.id===ss); const sGrades=sg(ss,st); const av=avg(sGrades); const att=attRate(ss);
             return (
-              <div style={{ background:"#fff", borderRadius:12, padding:24, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-                <div style={{ textAlign:"center", marginBottom:16, borderBottom:"2px solid #e5e7eb", paddingBottom:16 }}>
-                  <div style={{ fontSize:22, fontWeight:700, color:"#0f172a" }}>{school.name}</div>
-                  <div style={{ fontSize:13, color:"#64748b" }}>{school.address}</div>
-                  <div style={{ fontSize:15, fontWeight:600, color:"#1e40af", marginTop:8 }}>ACADEMIC REPORT — {selTerm} {selYear}</div>
+              <Card style={{ padding:28 }}>
+                <div style={{ textAlign:"center",marginBottom:16,borderBottom:"2px solid #1e40af",paddingBottom:14 }}>
+                  <div style={{ fontSize:20,fontWeight:700,color:"#0f172a" }}>{school.name}</div>
+                  <div style={{ fontSize:12,color:"#64748b" }}>{school.address} | {school.phone}</div>
+                  <div style={{ fontSize:15,fontWeight:700,color:"#1e40af",marginTop:8 }}>ACADEMIC REPORT — {st} 2024/2025</div>
                 </div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
-                  <div style={{ fontSize:13 }}><strong>Name:</strong> {stu?.name}</div>
-                  <div style={{ fontSize:13 }}><strong>Class:</strong> {stu?.class}</div>
-                  <div style={{ fontSize:13 }}><strong>Student ID:</strong> {stu?.id}</div>
-                  <div style={{ fontSize:13 }}><strong>Attendance:</strong> <span style={{ color:att>=80?"#16a34a":"#dc2626", fontWeight:600 }}>{att}%</span></div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16,fontSize:13 }}>
+                  <div><strong>Name:</strong> {stu?.name}</div><div><strong>Class:</strong> {stu?.class}</div>
+                  <div><strong>Student ID:</strong> {stu?.id}</div>
+                  <div><strong>Attendance:</strong> <span style={{ color:att>=80?"#16a34a":"#dc2626",fontWeight:700 }}>{att}%</span></div>
                 </div>
-                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13, marginBottom:16 }}>
-                  <thead><tr style={{ background:"#f8fafc" }}>
-                    {["Subject","Score","Grade","Remark"].map(h=><th key={h} style={{ padding:"8px 12px", textAlign:"left", fontWeight:600, borderBottom:"1px solid #e5e7eb" }}>{h}</th>)}
+                <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:16 }}>
+                  <thead><tr style={{ background:"#1e40af" }}>
+                    {["Subject","CA (30)","Exam (70)","Total (100)","Grade","Remark"].map(h=><th key={h} style={{ padding:"8px 12px",textAlign:"left",fontWeight:600,color:"#fff" }}>{h}</th>)}
                   </tr></thead>
                   <tbody>
-                    {sg.length>0?sg.map(g=>(
+                    {sGrades.length>0?sGrades.map(g=>(
                       <tr key={g.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
                         <td style={{ padding:"7px 12px" }}>{g.subject}</td>
-                        <td style={{ padding:"7px 12px" }}>{g.score}</td>
-                        <td style={{ padding:"7px 12px" }}><span style={{ fontWeight:700, color:g.grade==="A"?"#16a34a":g.grade==="F"?"#dc2626":"#0369a1" }}>{g.grade}</span></td>
-                        <td style={{ padding:"7px 12px", color:"#64748b", fontSize:11 }}>{g.score>=80?"Excellent":g.score>=70?"Very Good":g.score>=60?"Good":g.score>=50?"Average":"Below Average"}</td>
+                        <td style={{ padding:"7px 12px" }}>{g.ca??"-"}</td>
+                        <td style={{ padding:"7px 12px" }}>{g.exam??"-"}</td>
+                        <td style={{ padding:"7px 12px",fontWeight:700 }}>{g.score}</td>
+                        <td style={{ padding:"7px 12px" }}><span style={{ fontWeight:700,color:gradeColor(g.grade) }}>{g.grade}</span></td>
+                        <td style={{ padding:"7px 12px",color:"#64748b",fontSize:11 }}>{g.score>=80?"Excellent":g.score>=70?"Very Good":g.score>=60?"Good":g.score>=50?"Average":"Needs Improvement"}</td>
                       </tr>
-                    )):(<tr><td colSpan={4} style={{ padding:20, textAlign:"center", color:"#9ca3af" }}>No grades recorded for {selTerm}</td></tr>)}
+                    )):<tr><td colSpan={6} style={{ padding:20,textAlign:"center",color:"#9ca3af" }}>No grades for {st}</td></tr>}
                   </tbody>
                 </table>
-                {sg.length>0&&<div style={{ display:"flex", gap:16, padding:12, background:"#f0f9ff", borderRadius:8 }}>
-                  <div><span style={{ fontSize:12, color:"#0369a1" }}>Average Score: </span><strong>{av}%</strong></div>
-                  <div><span style={{ fontSize:12, color:"#0369a1" }}>Overall Grade: </span><strong style={{ color:av>=80?"#16a34a":av<50?"#dc2626":"#d97706" }}>{calcGrade(av)}</strong></div>
-                </div>}
-                <div style={{ marginTop:16 }}>
-                  <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print Report</button>
+                {sGrades.length>0&&(
+                  <div style={{ display:"flex",gap:16,padding:12,background:"#f0f9ff",borderRadius:8,marginBottom:16 }}>
+                    <div><span style={{ fontSize:12,color:"#0369a1" }}>Average: </span><strong>{av}%</strong></div>
+                    <div><span style={{ fontSize:12,color:"#0369a1" }}>Overall: </span><strong style={{ color:gradeColor(calcGrade(av)) }}>{calcGrade(av)}</strong></div>
+                    <div><span style={{ fontSize:12,color:"#0369a1" }}>Subjects: </span><strong>{sGrades.length}</strong></div>
+                  </div>
+                )}
+                <div style={{ display:"flex",gap:8 }}>
+                  <div style={{ flex:1,borderTop:"1px solid #e5e7eb",paddingTop:8,fontSize:12,color:"#64748b" }}>Class Teacher's Remarks: _______________</div>
+                  <div style={{ flex:1,borderTop:"1px solid #e5e7eb",paddingTop:8,fontSize:12,color:"#64748b" }}>Head's Signature: _______________</div>
                 </div>
-              </div>
+                <button onClick={()=>window.print()} style={{ ...btnP,marginTop:16 }}>🖨️ Print Report Card</button>
+              </Card>
             );
           })()}
         </div>
       )}
 
-      {reportType==="class"&&(
+      {rt==="class"&&(
         <div>
-          <div style={{ display:"flex", gap:10, marginBottom:14 }}>
-            <select value={selClass} onChange={e=>setSelClass(e.target.value)} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}>
-              {classes.map(c=><option key={c}>{c}</option>)}
-            </select>
-            <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}>
-              <option>Term 1</option><option>Term 2</option><option>Term 3</option>
-            </select>
+          <div style={{ display:"flex",gap:8,marginBottom:14 }}>
+            <select value={sc} onChange={e=>setSc(e.target.value)} style={{ ...inp,width:160 }}>{CLASSES.map(c=><option key={c}>{c}</option>)}</select>
+            <select value={st} onChange={e=>setSt(e.target.value)} style={{ ...inp,width:120 }}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
           </div>
-          <div style={{ background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-              <thead><tr style={{ background:"#f8fafc" }}>
-                {["#","Student","Avg Score","Grade","Attendance","Fees Status"].map(h=>(
-                  <th key={h} style={{ padding:"10px 12px", textAlign:"left", fontWeight:600, borderBottom:"1px solid #e5e7eb" }}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {classStudents.map((s,i)=>{
-                  const sg=studentGrades(s.id,selTerm,selYear);
-                  const av=avg(sg);
-                  const att=attRate(s.id);
-                  return (
-                    <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
-                      <td style={{ padding:"8px 12px", color:"#6b7280" }}>{i+1}</td>
-                      <td style={{ padding:"8px 12px", fontWeight:600 }}>{s.name}</td>
-                      <td style={{ padding:"8px 12px" }}>{sg.length?av+"% ("+sg.length+" subj.)":"No data"}</td>
-                      <td style={{ padding:"8px 12px" }}>{sg.length?<span style={{ fontWeight:700, color:av>=80?"#16a34a":av<50?"#dc2626":"#d97706" }}>{calcGrade(av)}</span>:"—"}</td>
-                      <td style={{ padding:"8px 12px" }}><span style={{ color:att>=80?"#16a34a":"#dc2626", fontWeight:600 }}>{att}%</span></td>
-                      <td style={{ padding:"8px 12px" }}>{s.fees-s.paid===0?<span style={{ color:"#16a34a", fontWeight:600 }}>✅ Cleared</span>:<span style={{ color:"#dc2626" }}>⚠️ {formatGHS(s.fees-s.paid)} due</span>}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <Table cols={["#","Student","Avg Score","Grade","Attendance","Fees Status","Position"]}
+            rows={[...classStu].map(s=>({ ...s,av:avg(sg(s.id,st)),att:attRate(s.id) })).sort((a,b)=>b.av-a.av).map((s,i)=>(
+              <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9",background:i<3?"#fffbeb":"#fff" }}>
+                <TD small color={i<3?"#d97706":"#9ca3af"}>{i+1}{i===0?"🥇":i===1?"🥈":i===2?"🥉":""}</TD>
+                <TD bold>{s.name}</TD>
+                <TD bold color={s.av>=70?"#16a34a":s.av>=50?"#d97706":"#dc2626"}>{s.av?s.av+"%":"No data"}</TD>
+                <td style={{ padding:"8px 12px" }}>{s.av?<Badge text={calcGrade(s.av)} color={gradeColor(calcGrade(s.av))}/>:<span>-</span>}</td>
+                <TD color={s.att>=80?"#16a34a":"#dc2626"} bold>{s.att}%</TD>
+                <td style={{ padding:"8px 12px" }}>{s.fees-s.paid===0?<Badge text="Cleared ✅" color="#166534" bg="#dcfce7"/>:<Badge text={formatGHS(s.fees-s.paid)+" due"} color="#991b1b" bg="#fee2e2"/>}</td>
+                <TD bold>{i+1}</TD>
+              </tr>
+            ))} emptyMsg="No students in this class."/>
+        </div>
+      )}
+
+      {rt==="subject"&&(
+        <div>
+          <div style={{ display:"flex",gap:8,marginBottom:14 }}>
+            <select value={sc} onChange={e=>setSc(e.target.value)} style={{ ...inp,width:160 }}>{CLASSES.map(c=><option key={c}>{c}</option>)}</select>
+            <select value={st} onChange={e=>setSt(e.target.value)} style={{ ...inp,width:120 }}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))",gap:12 }}>
+            {SUBJECTS.map(sub=>{
+              const sg2=grades.filter(g=>g.subject===sub&&g.term===st&&classStu.find(s=>s.id===g.studentId));
+              if(!sg2.length) return null;
+              const av2=avg(sg2); const pass=sg2.filter(g=>g.score>=50).length;
+              return (
+                <Card key={sub} style={{ padding:16,borderLeft:`4px solid ${av2>=70?"#16a34a":av2>=50?"#f59e0b":"#dc2626"}` }}>
+                  <div style={{ fontSize:14,fontWeight:700,color:"#0f172a",marginBottom:6 }}>{sub}</div>
+                  <div style={{ fontSize:24,fontWeight:700,color:av2>=70?"#16a34a":av2>=50?"#d97706":"#dc2626" }}>{av2}%</div>
+                  <div style={{ fontSize:11,color:"#64748b" }}>Class average</div>
+                  <div style={{ fontSize:11,color:"#94a3b8",marginTop:4 }}>{pass}/{sg2.length} passed</div>
+                </Card>
+              );
+            })}
           </div>
         </div>
       )}
 
-      {reportType==="subject"&&(
+      {rt==="school"&&(
         <div>
-          <div style={{ display:"flex", gap:10, marginBottom:14 }}>
-            <select value={selClass} onChange={e=>setSelClass(e.target.value)} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}>
-              {classes.map(c=><option key={c}>{c}</option>)}
-            </select>
-            <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}>
-              <option>Term 1</option><option>Term 2</option><option>Term 3</option>
-            </select>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12,marginBottom:20 }}>
+            <StatCard icon="🎒" label="Total Students" value={students.filter(s=>s.status==="active").length} color="#3b82f6"/>
+            <StatCard icon="👥" label="Total Staff" value={0} color="#8b5cf6"/>
+            <StatCard icon="💰" label="Total Fees Collected" value={formatGHS(fees.reduce((a,f)=>a+f.paid,0))} color="#10b981"/>
+            <StatCard icon="📤" label="Total Expenses" value={formatGHS(expenses.reduce((a,e)=>a+e.amount,0))} color="#f59e0b"/>
           </div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:12 }}>
-            {subjects.map(sub=>{
-              const sg = grades.filter(g=>g.subject===sub&&g.term===selTerm&&g.year===selYear&&classStudents.find(s=>s.id===g.studentId));
-              if(!sg.length) return null;
-              const av=avg(sg);
-              const pass=sg.filter(g=>g.score>=50).length;
-              return (
-                <div key={sub} style={{ background:"#fff", borderRadius:12, padding:16, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", borderLeft:`4px solid ${av>=70?"#16a34a":av>=50?"#d97706":"#dc2626"}` }}>
-                  <div style={{ fontSize:14, fontWeight:700, color:"#0f172a", marginBottom:6 }}>{sub}</div>
-                  <div style={{ fontSize:22, fontWeight:700, color:av>=70?"#16a34a":av>=50?"#d97706":"#dc2626" }}>{av}%</div>
-                  <div style={{ fontSize:12, color:"#64748b" }}>Class Average</div>
-                  <div style={{ fontSize:12, color:"#94a3b8", marginTop:4 }}>{pass}/{sg.length} passed · {sg.length} grades</div>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
+            <Card style={{ padding:18 }}>
+              <h3 style={{ margin:"0 0 12px",fontSize:15 }}>Students by Section</h3>
+              {[["Nursery/KG",students.filter(s=>s.status==="active"&&s.section==="nursery").length,"#ec4899"],["Primary",students.filter(s=>s.status==="active"&&s.section==="primary").length,"#3b82f6"],["JHS",students.filter(s=>s.status==="active"&&s.section==="jhs").length,"#8b5cf6"]].map(([l,v,c])=>(
+                <div key={l} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9",fontSize:13 }}>
+                  <span>{l}</span><span style={{ fontWeight:700,color:c }}>{v} students</span>
                 </div>
-              );
-            })}
+              ))}
+            </Card>
+            <Card style={{ padding:18 }}>
+              <h3 style={{ margin:"0 0 12px",fontSize:15 }}>Fee Collection Rate</h3>
+              {["primary","jhs","nursery"].map(sec=>{
+                const secStu=students.filter(s=>s.status==="active"&&s.section===sec);
+                const totalFees=secStu.reduce((a,s)=>a+s.fees,0);
+                const totalPaid=secStu.reduce((a,s)=>a+s.paid,0);
+                const rate=totalFees?Math.round((totalPaid/totalFees)*100):0;
+                return (
+                  <div key={sec} style={{ marginBottom:10 }}>
+                    <div style={{ display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3 }}>
+                      <span style={{ textTransform:"capitalize" }}>{sec}</span><span style={{ fontWeight:600 }}>{rate}%</span>
+                    </div>
+                    <div style={{ height:8,background:"#f1f5f9",borderRadius:4 }}>
+                      <div style={{ height:8,borderRadius:4,background:rate>=80?"#16a34a":"#f59e0b",width:`${rate}%` }}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </Card>
           </div>
         </div>
       )}
@@ -1535,56 +2137,36 @@ function Reports({ students, grades, attendance, fees, expenses, classes, subjec
   );
 }
 
-// ============================================================
-// ID CARDS
-// ============================================================
-function IDCards({ students, users, school }) {
-  const [type, setType]       = useState("student");
-  const [selId, setSelId]     = useState("");
-  const [preview, setPreview] = useState(null);
-
-  const allPeople = type==="student" ? students.filter(s=>s.status==="active") : users.filter(u=>u.active);
-
-  const generate = () => {
-    const person = allPeople.find(p=>p.id===selId);
-    if(!person) return;
-    setPreview(person);
-  };
-
-  const cardColors = { Admin:"#7c3aed", Headmaster:"#1d4ed8", HOD:"#0369a1", Teacher:"#059669", "Account Office":"#d97706", Librarian:"#6d28d9", "Non-Teaching Staff":"#6b7280" };
+// ─── ID CARDS ────────────────────────────────────────────────
+function IDCards({ students,users,school }) {
+  const [type,setType]=useState("student"); const [selId,setSelId]=useState(""); const [preview,setPreview]=useState(null);
+  const all=type==="student"?students.filter(s=>s.status==="active"):users.filter(u=>u.active);
+  const roleColors={ Admin:"#7c3aed",Headmaster:"#1d4ed8",HOD:"#0369a1",Teacher:"#059669","Account Office":"#d97706",Librarian:"#6d28d9","Non-Teaching Staff":"#6b7280" };
 
   return (
     <div>
-      <h2 style={{ margin:"0 0 16px", fontSize:20, fontWeight:700, color:"#0f172a" }}>🪪 ID Card Generator</h2>
-      <div style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap" }}>
-        <select value={type} onChange={e=>{setType(e.target.value);setSelId("");setPreview(null);}} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}>
-          <option value="student">Student</option>
-          <option value="staff">Staff</option>
-        </select>
-        <select value={selId} onChange={e=>setSelId(e.target.value)} style={{ flex:1, padding:"8px 12px", borderRadius:8, border:"1px solid #d1d5db", fontSize:13 }}>
-          <option value="">Select person</option>
-          {allPeople.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-        <button onClick={generate} style={btnPrimary}>Generate ID Card</button>
-        {type==="student"&&<button onClick={()=>{setPreview("all_students");}} style={{ ...btnPrimary, background:"#059669" }}>All Students</button>}
-        {type==="staff"&&<button onClick={()=>setPreview("all_staff")} style={{ ...btnPrimary, background:"#059669" }}>All Staff</button>}
+      <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>🪪 ID Card Generator</h2>
+      <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
+        <select value={type} onChange={e=>{setType(e.target.value);setSelId("");setPreview(null);}} style={{ ...inp,width:140 }}><option value="student">Student</option><option value="staff">Staff</option></select>
+        <select value={selId} onChange={e=>setSelId(e.target.value)} style={{ ...inp,flex:1 }}><option value="">Select person</option>{all.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <button onClick={()=>setPreview(all.find(p=>p.id===selId)||null)} style={btnP}>Generate</button>
+        <button onClick={()=>setPreview("ALL")} style={{ ...btnP,background:"#059669" }}>All {type==="student"?"Students":"Staff"}</button>
       </div>
 
-      {preview&&preview!=="all_students"&&preview!=="all_staff"&&(
-        <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
-          <IDCard person={preview} type={type} school={school} cardColors={cardColors}/>
-          <button onClick={()=>window.print()} style={{ ...btnPrimary, marginTop:16 }}>🖨️ Print ID Card</button>
+      {preview&&preview!=="ALL"&&(
+        <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:16 }}>
+          <IDCard person={preview} type={type} school={school} roleColors={roleColors}/>
+          <button onClick={()=>window.print()} style={btnP}>🖨️ Print</button>
         </div>
       )}
-
-      {(preview==="all_students"||preview==="all_staff")&&(
+      {preview==="ALL"&&(
         <div>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-            <p style={{ margin:0, color:"#64748b", fontSize:13 }}>Showing {allPeople.length} ID cards</p>
-            <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print All</button>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+            <p style={{ margin:0,color:"#64748b",fontSize:13 }}>{all.length} cards</p>
+            <button onClick={()=>window.print()} style={btnP}>🖨️ Print All</button>
           </div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))", gap:16 }}>
-            {allPeople.map(p=><IDCard key={p.id} person={p} type={type} school={school} cardColors={cardColors}/>)}
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:16 }}>
+            {all.map(p=><IDCard key={p.id} person={p} type={type} school={school} roleColors={roleColors}/>)}
           </div>
         </div>
       )}
@@ -1592,259 +2174,188 @@ function IDCards({ students, users, school }) {
   );
 }
 
-function IDCard({ person, type, school, cardColors }) {
-  const bgColor = type==="staff" ? (cardColors[person.role]||"#1e40af") : "#1e40af";
+function IDCard({ person,type,school,roleColors }) {
+  const bg=type==="staff"?(roleColors[person.role]||"#1e40af"):"#1e40af";
   return (
-    <div style={{ width:320, borderRadius:16, overflow:"hidden", boxShadow:"0 4px 16px rgba(0,0,0,0.15)", fontFamily:"'Segoe UI',sans-serif" }}>
-      <div style={{ background:bgColor, padding:"16px 20px", color:"#fff" }}>
-        <div style={{ fontSize:14, fontWeight:700 }}>{school.name}</div>
-        <div style={{ fontSize:11, opacity:0.8 }}>{school.address}</div>
-        <div style={{ fontSize:11, opacity:0.8, marginTop:2 }}>{school.motto}</div>
+    <div style={{ width:300,borderRadius:14,overflow:"hidden",boxShadow:"0 4px 16px rgba(0,0,0,0.15)",fontFamily:"'Segoe UI',sans-serif" }}>
+      <div style={{ background:bg,padding:"14px 18px",color:"#fff" }}>
+        <div style={{ fontSize:14,fontWeight:700 }}>{school.name}</div>
+        <div style={{ fontSize:10,opacity:0.8 }}>{school.motto}</div>
       </div>
-      <div style={{ background:"#fff", padding:"16px 20px", display:"flex", gap:14 }}>
-        <div style={{ width:60, height:60, borderRadius:10, background:bgColor+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:28, flexShrink:0 }}>
-          {type==="student"?"🎒":"👤"}
-        </div>
+      <div style={{ background:"#fff",padding:"14px 18px",display:"flex",gap:12 }}>
+        <div style={{ width:54,height:54,borderRadius:10,background:bg+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,flexShrink:0 }}>{type==="student"?"🎒":"👤"}</div>
         <div>
-          <div style={{ fontSize:15, fontWeight:700, color:"#0f172a" }}>{person.name}</div>
-          {type==="student"&&<><div style={{ fontSize:12, color:"#64748b" }}>Class: {person.class}</div><div style={{ fontSize:12, color:"#64748b" }}>Guardian: {person.guardian}</div></>}
-          {type==="staff"&&<><div style={{ fontSize:12, color:bgColor, fontWeight:600 }}>{person.role}</div><div style={{ fontSize:11, color:"#64748b" }}>{person.email}</div></>}
+          <div style={{ fontSize:14,fontWeight:700,color:"#0f172a" }}>{person.name}</div>
+          {type==="student"&&<><div style={{ fontSize:11,color:"#64748b" }}>Class: {person.class}</div><div style={{ fontSize:11,color:"#64748b" }}>Guardian: {person.guardian}</div></>}
+          {type==="staff"&&<><div style={{ fontSize:11,color:bg,fontWeight:600 }}>{person.role}</div><div style={{ fontSize:10,color:"#64748b" }}>{person.email}</div></>}
         </div>
       </div>
-      <div style={{ background:"#f8fafc", padding:"8px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <div>
-          <div style={{ fontSize:11, color:"#94a3b8" }}>ID</div>
-          <div style={{ fontSize:13, fontWeight:700, color:"#1e40af", letterSpacing:1 }}>{person.id}</div>
-        </div>
-        {type==="staff"&&<div>
-          <div style={{ fontSize:11, color:"#94a3b8" }}>Code</div>
-          <div style={{ fontSize:13, fontWeight:700, color:bgColor }}>{person.code}</div>
-        </div>}
-        <div style={{ width:50, height:50, background:"#0f172a", borderRadius:6, display:"flex", alignItems:"center", justifyContent:"center", fontSize:8, color:"#fff", padding:4, textAlign:"center" }}>
-          QR<br/>{person.id}
-        </div>
+      <div style={{ background:"#f8fafc",padding:"8px 18px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+        <div><div style={{ fontSize:9,color:"#94a3b8" }}>ID</div><div style={{ fontSize:12,fontWeight:700,color:"#1e40af",letterSpacing:1 }}>{person.id}</div></div>
+        {type==="staff"&&<div><div style={{ fontSize:9,color:"#94a3b8" }}>CODE</div><div style={{ fontSize:12,fontWeight:700,color:bg }}>{person.code}</div></div>}
+        <div style={{ width:44,height:44,background:"#0f172a",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,color:"#fff",padding:3,textAlign:"center" }}>QR{"\n"}{person.id}</div>
       </div>
     </div>
   );
 }
 
-// ============================================================
-// ARCHIVE
-// ============================================================
-function Archive({ students, setStudents, users, setUsers, notify, addAudit }) {
-  const [tab, setTab] = useState("dropouts");
-  const dropped   = students.filter(s=>s.status==="dropout");
-  const graduated = students.filter(s=>s.status==="graduated");
-  const inactive  = users.filter(u=>!u.active);
+// ─── ARCHIVE ─────────────────────────────────────────────────
+function Archive({ students,setStudents,users,setUsers,notify,addAudit }) {
+  const [tab,setTab]=useState("dropouts");
+  const dropped=students.filter(s=>s.status==="dropout");
+  const graduated=students.filter(s=>s.status==="graduated");
+  const inactive=users.filter(u=>!u.active);
 
-  const restore = (id) => {
-    setStudents(prev=>prev.map(s=>s.id===id?{...s,status:"active"}:s));
-    addAudit(`Restored student ${id}`,"Archive"); notify("Student restored to active");
-  };
+  const restore=id=>{ setStudents(p=>p.map(s=>s.id===id?{...s,status:"active"}:s)); addAudit(`Restored: ${id}`,"Archive"); notify("Restored to active"); };
+  const graduate=id=>{ setStudents(p=>p.map(s=>s.id===id?{...s,status:"graduated"}:s)); addAudit(`Graduated: ${id}`,"Archive"); notify("Marked as graduated"); };
+
+  const cols=["ID","Name","Class","Guardian","Phone","Status","Actions"];
+  const rows=(list)=>list.map(s=>(
+    <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+      <TD small color="#6b7280">{s.id}</TD><TD bold>{s.name}</TD><TD>{s.class}</TD>
+      <TD>{s.guardian}</TD><TD small>{s.phone}</TD>
+      <td style={{ padding:"8px 12px" }}><Badge text={s.status} color={s.status==="dropout"?"#991b1b":"#1d4ed8"} bg={s.status==="dropout"?"#fee2e2":"#dbeafe"}/></td>
+      <td style={{ padding:"8px 12px",display:"flex",gap:4 }}>
+        <button onClick={()=>restore(s.id)} style={{ ...btnSm,background:"#dcfce7",color:"#166534" }}>Restore</button>
+        {s.status==="dropout"&&<button onClick={()=>graduate(s.id)} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8" }}>Graduate</button>}
+      </td>
+    </tr>
+  ));
 
   return (
     <div>
-      <h2 style={{ margin:"0 0 16px", fontSize:20, fontWeight:700, color:"#0f172a" }}>🗄️ Archive & Records</h2>
-      <div style={{ display:"flex", gap:8, marginBottom:16 }}>
-        {[["dropouts","Dropouts / Expelled",dropped.length],["graduated","Graduated",graduated.length],["staff","Former Staff",inactive.length]].map(([k,l,c])=>(
-          <button key={k} onClick={()=>setTab(k)} style={{ padding:"8px 18px", borderRadius:8, border:"none", cursor:"pointer", fontWeight:600, fontSize:13, background:tab===k?"#1e40af":"#e5e7eb", color:tab===k?"#fff":"#374151" }}>
-            {l} <span style={{ background:"rgba(255,255,255,0.25)", borderRadius:10, padding:"1px 6px", fontSize:11 }}>{c}</span>
-          </button>
-        ))}
-      </div>
-
-      {(tab==="dropouts"||tab==="graduated")&&(
-        <div style={{ background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-            <thead><tr style={{ background:"#f8fafc" }}>
-              {["ID","Name","Class","Guardian","Phone","Status","Actions"].map(h=>(
-                <th key={h} style={{ padding:"10px 12px", textAlign:"left", fontWeight:600, borderBottom:"1px solid #e5e7eb" }}>{h}</th>
-              ))}
-            </tr></thead>
-            <tbody>
-              {(tab==="dropouts"?dropped:graduated).map(s=>(
-                <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
-                  <td style={{ padding:"8px 12px", color:"#6b7280" }}>{s.id}</td>
-                  <td style={{ padding:"8px 12px", fontWeight:600 }}>{s.name}</td>
-                  <td style={{ padding:"8px 12px" }}>{s.class}</td>
-                  <td style={{ padding:"8px 12px" }}>{s.guardian}</td>
-                  <td style={{ padding:"8px 12px" }}>{s.phone}</td>
-                  <td style={{ padding:"8px 12px" }}>
-                    <span style={{ background:s.status==="dropout"?"#fee2e2":"#dbeafe", color:s.status==="dropout"?"#991b1b":"#1d4ed8", padding:"2px 8px", borderRadius:10, fontSize:11, fontWeight:600 }}>
-                      {s.status==="dropout"?"Dropped Out":"Graduated"}
-                    </span>
-                  </td>
-                  <td style={{ padding:"8px 12px" }}>
-                    {s.status==="dropout"&&<button onClick={()=>restore(s.id)} style={{ ...btnSmall, background:"#dcfce7", color:"#166534" }}>Restore</button>}
-                  </td>
-                </tr>
-              ))}
-              {(tab==="dropouts"?dropped:graduated).length===0&&<tr><td colSpan={7} style={{ padding:20, textAlign:"center", color:"#9ca3af" }}>No records found.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      )}
-
+      <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>🗄️ Archive & Records</h2>
+      <Tabs tabs={[{key:"dropouts",label:`Dropouts (${dropped.length})`},{key:"graduated",label:`Graduated (${graduated.length})`},{key:"staff",label:`Former Staff (${inactive.length})`}]} active={tab} onChange={setTab}/>
+      {(tab==="dropouts")&&<Table cols={cols} rows={rows(dropped)} emptyMsg="No dropout records."/>}
+      {(tab==="graduated")&&<Table cols={cols} rows={rows(graduated)} emptyMsg="No graduated records."/>}
       {tab==="staff"&&(
-        <div style={{ background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-            <thead><tr style={{ background:"#f8fafc" }}>
-              {["ID","Code","Name","Role","Email"].map(h=>(
-                <th key={h} style={{ padding:"10px 12px", textAlign:"left", fontWeight:600, borderBottom:"1px solid #e5e7eb" }}>{h}</th>
-              ))}
-            </tr></thead>
-            <tbody>
-              {inactive.map(u=>(
-                <tr key={u.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
-                  <td style={{ padding:"8px 12px", color:"#6b7280" }}>{u.id}</td>
-                  <td style={{ padding:"8px 12px", fontWeight:700, color:"#6b7280" }}>{u.code}</td>
-                  <td style={{ padding:"8px 12px", fontWeight:600 }}>{u.name}</td>
-                  <td style={{ padding:"8px 12px" }}>{u.role}</td>
-                  <td style={{ padding:"8px 12px", color:"#6b7280" }}>{u.email}</td>
-                </tr>
-              ))}
-              {inactive.length===0&&<tr><td colSpan={5} style={{ padding:20, textAlign:"center", color:"#9ca3af" }}>No former staff records.</td></tr>}
-            </tbody>
-          </table>
-        </div>
+        <Table cols={["ID","Code","Name","Role","Email"]}
+          rows={inactive.map(u=>(
+            <tr key={u.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+              <TD small color="#6b7280">{u.id}</TD><TD bold color="#6b7280">{u.code}</TD>
+              <TD bold>{u.name}</TD><TD>{u.role}</TD><TD small color="#6b7280">{u.email}</TD>
+            </tr>
+          ))} emptyMsg="No former staff."/>
       )}
     </div>
   );
 }
 
-// ============================================================
-// AUDIT LOG
-// ============================================================
-function AuditLog({ auditLog, users }) {
-  const getUser = (code) => users.find(u=>u.code===code);
+// ─── AUDIT LOG ───────────────────────────────────────────────
+function AuditLog({ auditLog,users }) {
+  const [search,setSearch]=useState("");
+  const filtered=[...auditLog].reverse().filter(l=>!search||(l.user+l.action+l.section).toLowerCase().includes(search.toLowerCase()));
   return (
     <div>
-      <h2 style={{ margin:"0 0 16px", fontSize:20, fontWeight:700, color:"#0f172a" }}>🔍 Audit Log</h2>
-      <p style={{ fontSize:13, color:"#64748b", marginBottom:14 }}>All data entries are tracked by staff code for accountability.</p>
-      <div style={{ background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-          <thead><tr style={{ background:"#f8fafc" }}>
-            {["Timestamp","Staff Code","Staff Name","Role","Action","Section"].map(h=>(
-              <th key={h} style={{ padding:"10px 12px", textAlign:"left", fontWeight:600, borderBottom:"1px solid #e5e7eb" }}>{h}</th>
-            ))}
-          </tr></thead>
-          <tbody>
-            {[...auditLog].reverse().map(log=>{
-              const u=getUser(log.user);
-              return (
-                <tr key={log.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
-                  <td style={{ padding:"8px 12px", fontSize:11, color:"#6b7280", whiteSpace:"nowrap" }}>{log.timestamp}</td>
-                  <td style={{ padding:"8px 12px", fontWeight:700, color:"#1e40af" }}>{log.user}</td>
-                  <td style={{ padding:"8px 12px" }}>{u?.name||"—"}</td>
-                  <td style={{ padding:"8px 12px", fontSize:11 }}>{u?.role||"—"}</td>
-                  <td style={{ padding:"8px 12px" }}>{log.action}</td>
-                  <td style={{ padding:"8px 12px" }}><span style={{ background:"#f1f5f9", padding:"2px 8px", borderRadius:8, fontSize:11 }}>{log.section}</span></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>🔍 Audit Log</h2>
+      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by staff code, action, section..." style={{ ...inp,maxWidth:400,marginBottom:14 }}/>
+      <Table cols={["Timestamp","Staff Code","Name","Role","Action","Section"]}
+        rows={filtered.slice(0,100).map(log=>{ const u=users.find(x=>x.code===log.user); return (
+          <tr key={log.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+            <TD small color="#6b7280">{log.timestamp}</TD>
+            <TD bold color="#1e40af">{log.user}</TD>
+            <TD>{u?.name||"—"}</TD>
+            <TD small color="#6b7280">{u?.role||"—"}</TD>
+            <TD>{log.action}</TD>
+            <td style={{ padding:"8px 12px" }}><Badge text={log.section} color="#374151" bg="#f1f5f9"/></td>
+          </tr>
+        );})} emptyMsg="No audit records."/>
     </div>
   );
 }
 
-// ============================================================
-// SETTINGS
-// ============================================================
-function Settings({ school, setSchool, users, setUsers, notify, addAudit }) {
-  const [form, setForm]   = useState({...school});
-  const [tab, setTab]     = useState("school");
+// ─── SETTINGS ────────────────────────────────────────────────
+function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo }) {
+  const [form,setForm]=useState({...school}); const [tab,setTab]=useState("school");
+  const [resetId,setResetId]=useState(""); const [newPin,setNewPin]=useState("");
 
-  const saveSchool = () => {
-    setSchool({...form});
-    addAudit("Updated school settings","Settings");
-    notify("School settings saved ✅");
+  const save=()=>{ setSchool({...form}); addAudit("Updated school settings","Settings"); notify("Settings saved ✅"); };
+
+  const resetPin=()=>{
+    if(!resetId||!newPin||newPin.length!==4){ notify("Select staff and enter 4-digit PIN","error"); return; }
+    setUsers(p=>p.map(u=>u.id===resetId?{...u,pin:newPin}:u));
+    addAudit(`PIN reset for ${resetId}`,"Settings"); notify("PIN reset successfully"); setResetId(""); setNewPin("");
+  };
+
+  const exportData=()=>{
+    const data={ school,users,exportDate:nowStr(),version:"5.0" };
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download=`EduSmart_Backup_${todayStr()}.json`; a.click();
+    notify("Data exported ✅"); addAudit("Data exported","Settings");
   };
 
   return (
     <div>
-      <h2 style={{ margin:"0 0 16px", fontSize:20, fontWeight:700, color:"#0f172a" }}>⚙️ Settings</h2>
-      <div style={{ display:"flex", gap:8, marginBottom:16 }}>
-        {["school","licence"].map(t=>(
-          <button key={t} onClick={()=>setTab(t)} style={{ padding:"8px 18px", borderRadius:8, border:"none", cursor:"pointer", fontWeight:600, fontSize:13, background:tab===t?"#1e40af":"#e5e7eb", color:tab===t?"#fff":"#374151" }}>
-            {t==="school"?"🏫 School Profile":"🔑 Licence"}
-          </button>
-        ))}
-      </div>
+      <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>⚙️ Settings</h2>
+      <Tabs tabs={[{key:"school",label:"🏫 School Profile"},{key:"security",label:"🔐 Security"},{key:"data",label:"💾 Data & Backup"},{key:"licence",label:"🔑 Licence"}]} active={tab} onChange={setTab}/>
 
       {tab==="school"&&(
-        <div style={{ background:"#fff", borderRadius:12, padding:24, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", maxWidth:560 }}>
-          <h3 style={{ margin:"0 0 16px", fontSize:16 }}>School Profile (appears on receipts & reports)</h3>
-          <FormRow label="School Name"><input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} style={inp}/></FormRow>
-          <FormRow label="Address"><input value={form.address} onChange={e=>setForm(p=>({...p,address:e.target.value}))} style={inp}/></FormRow>
-          <FormRow label="Phone"><input value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))} style={inp}/></FormRow>
-          <FormRow label="Email"><input value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))} style={inp}/></FormRow>
-          <FormRow label="Motto"><input value={form.motto} onChange={e=>setForm(p=>({...p,motto:e.target.value}))} style={inp}/></FormRow>
-          <FormRow label="Current Term">
-            <select value={form.currentTerm} onChange={e=>setForm(p=>({...p,currentTerm:e.target.value}))} style={inp}>
-              <option>Term 1</option><option>Term 2</option><option>Term 3</option>
-            </select>
-          </FormRow>
-          <FormRow label="Academic Year"><input value={form.currentYear} onChange={e=>setForm(p=>({...p,currentYear:e.target.value}))} style={inp}/></FormRow>
-          <button onClick={saveSchool} style={{ ...btnPrimary, marginTop:16 }}>Save Settings</button>
-        </div>
+        <Card style={{ padding:24,maxWidth:580 }}>
+          <h3 style={{ margin:"0 0 16px",fontSize:16 }}>School Profile (appears on all receipts, reports, ID cards)</h3>
+          <Row label="School Name"><input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} style={inp}/></Row>
+          <Row label="Address"><input value={form.address} onChange={e=>setForm(p=>({...p,address:e.target.value}))} style={inp}/></Row>
+          <Row label="Phone"><input value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))} style={inp}/></Row>
+          <Row label="Email"><input value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))} style={inp}/></Row>
+          <Row label="School Motto"><input value={form.motto} onChange={e=>setForm(p=>({...p,motto:e.target.value}))} style={inp}/></Row>
+          <Row label="Principal/Head's Name"><input value={form.principalName||""} onChange={e=>setForm(p=>({...p,principalName:e.target.value}))} style={inp}/></Row>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+            <Row label="Current Term"><select value={form.currentTerm} onChange={e=>setForm(p=>({...p,currentTerm:e.target.value}))} style={inp}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select></Row>
+            <Row label="Academic Year"><input value={form.currentYear} onChange={e=>setForm(p=>({...p,currentYear:e.target.value}))} style={inp}/></Row>
+          </div>
+          <button onClick={save} style={{ ...btnP,marginTop:16 }}>Save Settings</button>
+        </Card>
+      )}
+
+      {tab==="security"&&(
+        <Card style={{ padding:24,maxWidth:480 }}>
+          <h3 style={{ margin:"0 0 16px",fontSize:16 }}>Reset Staff PIN</h3>
+          <p style={{ fontSize:13,color:"#64748b",marginBottom:16 }}>Admin can reset any staff member's PIN without knowing the old one.</p>
+          <Row label="Select Staff Member"><select value={resetId} onChange={e=>setResetId(e.target.value)} style={inp}><option value="">-- Select --</option>{users.filter(u=>u.active).map(u=><option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}</select></Row>
+          <Row label="New PIN (4 digits)"><input type="password" value={newPin} onChange={e=>setNewPin(e.target.value)} maxLength={4} style={inp}/></Row>
+          <button onClick={resetPin} style={{ ...btnP,marginTop:8 }}>Reset PIN</button>
+          <div style={{ marginTop:24,borderTop:"1px solid #e5e7eb",paddingTop:16 }}>
+            <h3 style={{ margin:"0 0 10px",fontSize:15 }}>Security Info</h3>
+            <div style={{ background:"#f0f9ff",borderRadius:8,padding:12,fontSize:13,lineHeight:2 }}>
+              <div>✅ Session auto-logout after <strong>15 minutes</strong> of inactivity</div>
+              <div>🔒 Account locks after <strong>3 failed PIN attempts</strong></div>
+              <div>📋 All actions logged in Audit Log with staff code</div>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {tab==="data"&&(
+        <Card style={{ padding:24,maxWidth:480 }}>
+          <h3 style={{ margin:"0 0 12px",fontSize:16 }}>Data Export & Backup</h3>
+          <p style={{ fontSize:13,color:"#64748b",marginBottom:16 }}>Export school data as a JSON backup file. Store it safely.</p>
+          <button onClick={exportData} style={{ ...btnP,marginBottom:16 }}>📥 Export All Data (JSON)</button>
+          <div style={{ background:"#fff7ed",borderRadius:8,padding:12,fontSize:12,color:"#9a3412" }}>
+            ⚠️ Data is stored in your browser. Export regularly to avoid data loss if the browser is cleared.
+          </div>
+        </Card>
       )}
 
       {tab==="licence"&&(
-        <div style={{ background:"#fff", borderRadius:12, padding:24, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", maxWidth:480 }}>
-          <h3 style={{ margin:"0 0 16px", fontSize:16 }}>Licence Information</h3>
-          <div style={{ background:"#f0f9ff", borderRadius:10, padding:16, fontSize:13, lineHeight:2 }}>
-            <div><strong>Product:</strong> EduSmart School Manager v4.0</div>
-            <div><strong>School:</strong> {school.name}</div>
-            <div><strong>Developer:</strong> Gilbert Oscar Prah (EduSmart)</div>
-            <div><strong>Contact:</strong> aifarms101@gmail.com | 0597147460</div>
+        <Card style={{ padding:24,maxWidth:480 }}>
+          <h3 style={{ margin:"0 0 16px",fontSize:16 }}>Licence</h3>
+          <div style={{ background:"#f0f9ff",borderRadius:10,padding:16,fontSize:13,lineHeight:2,marginBottom:16 }}>
+            <div><strong>Product:</strong> EduSmart School Manager v5.0</div>
+            <div><strong>Type:</strong> <Badge text={licInfo?.type?.toUpperCase()||"—"} color={licInfo?.type==="trial"?"#92400e":"#166534"} bg={licInfo?.type==="trial"?"#fef3c7":"#dcfce7"}/></div>
+            <div><strong>Developer:</strong> Gilbert Oscar Prah</div>
+            <div><strong>Contact:</strong> 0597147460 | aifarms101@gmail.com</div>
           </div>
-          <div style={{ marginTop:16, borderTop:"1px solid #e5e7eb", paddingTop:16 }}>
-            <h4 style={{ fontSize:14, color:"#374151", margin:"0 0 10px" }}>Pricing</h4>
-            {[["Trial (1 Term)","Free","Limited to 1 term"],["Basic (Annual)","GH₵ 1,500/year","Full features"],["Pro (Multi-school)","GH₵ 3,500/year","Multi-branch support"]].map(([name,price,desc])=>(
-              <div key={name} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:"1px solid #f1f5f9", fontSize:13 }}>
-                <span><strong>{name}</strong> — {desc}</span>
-                <span style={{ fontWeight:700, color:"#1e40af" }}>{price}</span>
-              </div>
-            ))}
+          <h4 style={{ fontSize:14,margin:"0 0 10px" }}>Pricing</h4>
+          {[["Trial (1 Term)","Free","All features, 1 term"],["Basic Annual","GH₵ 1,500/yr","1 school, full access"],["Pro Multi-school","GH₵ 3,500/yr","Multiple branches, priority support"]].map(([n,p,d])=>(
+            <div key={n} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #f1f5f9",fontSize:13 }}>
+              <span><strong>{n}</strong> — {d}</span><span style={{ fontWeight:700,color:"#1e40af" }}>{p}</span>
+            </div>
+          ))}
+          <div style={{ marginTop:14,background:"#fffbeb",borderRadius:8,padding:12,fontSize:12,color:"#92400e" }}>
+            📞 Renew or upgrade: <strong>0597147460</strong> | <strong>aifarms101@gmail.com</strong>
           </div>
-          <div style={{ marginTop:16, background:"#fffbeb", borderRadius:8, padding:12, fontSize:12, color:"#92400e" }}>
-            📞 To purchase or renew: <strong>0597147460</strong> | <strong>aifarms101@gmail.com</strong>
-          </div>
-        </div>
+        </Card>
       )}
     </div>
   );
 }
-
-// ============================================================
-// SHARED UI COMPONENTS
-// ============================================================
-function FormModal({ title, children, onClose }) {
-  return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:500, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
-      <div style={{ background:"#fff", borderRadius:14, padding:24, maxWidth:520, width:"100%", maxHeight:"90vh", overflowY:"auto", boxShadow:"0 20px 50px rgba(0,0,0,0.3)" }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
-          <h3 style={{ margin:0, fontSize:16, fontWeight:700, color:"#0f172a" }}>{title}</h3>
-          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#6b7280" }}>×</button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function FormRow({ label, children }) {
-  return (
-    <div style={{ marginBottom:12 }}>
-      <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#374151", marginBottom:4 }}>{label}</label>
-      {children}
-    </div>
-  );
-}
-
-const inp = { width:"100%", padding:"8px 12px", borderRadius:8, border:"1.5px solid #d1d5db", fontSize:13, boxSizing:"border-box" };
-const btnPrimary   = { padding:"9px 20px", background:"#1e40af", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:600 };
-const btnSecondary = { padding:"9px 20px", background:"#e5e7eb", color:"#374151", border:"none", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:600 };
-const btnSmall     = { padding:"5px 10px", border:"none", borderRadius:6, cursor:"pointer", fontSize:11, fontWeight:600 };
