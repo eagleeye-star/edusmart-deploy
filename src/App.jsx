@@ -140,22 +140,33 @@ const INITIAL_EXAM_SCHEDULE = [
   { id:"EXM003", class:"Class 6A", subject:"Mathematics",     date:"2025-02-10", startTime:"10:30", endTime:"12:00", venue:"Classroom",  createdBy:"ADM001" },
 ];
 
-const TIMETABLES = {
-  "Class 6A": [
-    { day:"Monday",    periods:[{time:"7:30-8:30",subject:"Mathematics"},{time:"8:30-9:30",subject:"English Language"},{time:"9:30-10:30",subject:"Science"},{time:"10:30-11:00",subject:"Break"},{time:"11:00-12:00",subject:"Social Studies"},{time:"12:00-13:00",subject:"Lunch"},{time:"13:00-14:00",subject:"ICT"},{time:"14:00-15:00",subject:"Creative Arts"}]},
-    { day:"Tuesday",   periods:[{time:"7:30-8:30",subject:"English Language"},{time:"8:30-9:30",subject:"Mathematics"},{time:"9:30-10:30",subject:"RME"},{time:"10:30-11:00",subject:"Break"},{time:"11:00-12:00",subject:"Science"},{time:"12:00-13:00",subject:"Lunch"},{time:"13:00-14:00",subject:"French"},{time:"14:00-15:00",subject:"Physical Education"}]},
-    { day:"Wednesday", periods:[{time:"7:30-8:30",subject:"Mathematics"},{time:"8:30-9:30",subject:"Science"},{time:"9:30-10:30",subject:"English Language"},{time:"10:30-11:00",subject:"Break"},{time:"11:00-12:00",subject:"Creative Arts"},{time:"12:00-13:00",subject:"Lunch"},{time:"13:00-14:00",subject:"Social Studies"},{time:"14:00-15:00",subject:"Ghanaian Language"}]},
-    { day:"Thursday",  periods:[{time:"7:30-8:30",subject:"Science"},{time:"8:30-9:30",subject:"English Language"},{time:"9:30-10:30",subject:"Mathematics"},{time:"10:30-11:00",subject:"Break"},{time:"11:00-12:00",subject:"ICT"},{time:"12:00-13:00",subject:"Lunch"},{time:"13:00-14:00",subject:"RME"},{time:"14:00-15:00",subject:"French"}]},
-    { day:"Friday",    periods:[{time:"7:30-8:30",subject:"Social Studies"},{time:"8:30-9:30",subject:"Mathematics"},{time:"9:30-10:30",subject:"English Language"},{time:"10:30-11:00",subject:"Break"},{time:"11:00-12:00",subject:"Physical Education"},{time:"12:00-13:00",subject:"Lunch"},{time:"13:00-14:00",subject:"Ghanaian Language"},{time:"14:00-15:00",subject:"Creative Arts"}]},
-  ],
-  "Class 5B": [
-    { day:"Monday",    periods:[{time:"7:30-8:30",subject:"English Language"},{time:"8:30-9:30",subject:"Mathematics"},{time:"9:30-10:30",subject:"Science"},{time:"10:30-11:00",subject:"Break"},{time:"11:00-12:00",subject:"RME"},{time:"12:00-13:00",subject:"Lunch"},{time:"13:00-14:00",subject:"Social Studies"},{time:"14:00-15:00",subject:"Physical Education"}]},
-    { day:"Tuesday",   periods:[{time:"7:30-8:30",subject:"Mathematics"},{time:"8:30-9:30",subject:"English Language"},{time:"9:30-10:30",subject:"Social Studies"},{time:"10:30-11:00",subject:"Break"},{time:"11:00-12:00",subject:"Science"},{time:"12:00-13:00",subject:"Lunch"},{time:"13:00-14:00",subject:"Creative Arts"},{time:"14:00-15:00",subject:"French"}]},
-    { day:"Wednesday", periods:[{time:"7:30-8:30",subject:"Science"},{time:"8:30-9:30",subject:"Mathematics"},{time:"9:30-10:30",subject:"English Language"},{time:"10:30-11:00",subject:"Break"},{time:"11:00-12:00",subject:"Ghanaian Language"},{time:"12:00-13:00",subject:"Lunch"},{time:"13:00-14:00",subject:"ICT"},{time:"14:00-15:00",subject:"RME"}]},
-    { day:"Thursday",  periods:[{time:"7:30-8:30",subject:"English Language"},{time:"8:30-9:30",subject:"Science"},{time:"9:30-10:30",subject:"Mathematics"},{time:"10:30-11:00",subject:"Break"},{time:"11:00-12:00",subject:"Creative Arts"},{time:"12:00-13:00",subject:"Lunch"},{time:"13:00-14:00",subject:"French"},{time:"14:00-15:00",subject:"Social Studies"}]},
-    { day:"Friday",    periods:[{time:"7:30-8:30",subject:"Mathematics"},{time:"8:30-9:30",subject:"English Language"},{time:"9:30-10:30",subject:"Social Studies"},{time:"10:30-11:00",subject:"Break"},{time:"11:00-12:00",subject:"Ghanaian Language"},{time:"12:00-13:00",subject:"Lunch"},{time:"13:00-14:00",subject:"Physical Education"},{time:"14:00-15:00",subject:"Science"}]},
-  ],
-};
+// Auto-generate a Monday-Friday timetable for every class so all 20 classes
+// (Creche through JHS 3) have a starting timetable instead of just 2 hardcoded ones.
+// Admin/HOD can still edit any cell via the Timetable Builder.
+function generateTimetable(cls) {
+  const isKG = KG_CLASSES.includes(cls);
+  const isJHS = JHS_CLASSES.includes(cls);
+  const slots = isKG
+    ? ["7:30-8:15","8:15-9:00","9:00-9:45","9:45-10:15","10:15-11:00","11:00-12:00","12:00-13:00","13:00-13:45"]
+    : ["7:30-8:30","8:30-9:30","9:30-10:30","10:30-11:00","11:00-12:00","12:00-13:00","13:00-14:00","14:00-15:00"];
+  const kgSubjects = ["Number Work","Literacy","Creative Play","Break","Music & Movement","Lunch","Story Time","Outdoor Play"];
+  const pool = isJHS ? EXAM_SUBJECTS.concat(["Pre-Technical Skills","Physical Education"]) : SUBJECTS;
+  const days = ["Monday","Tuesday","Wednesday","Thursday","Friday"];
+  // Simple deterministic rotation per class so each class gets a distinct but stable pattern
+  const seed = cls.split("").reduce((a,c)=>a+c.charCodeAt(0),0);
+  return days.map((day,di)=>({
+    day,
+    periods: slots.map((time,pi)=>{
+      if (isKG) return { time, subject: kgSubjects[pi] };
+      if (time==="10:30-11:00") return { time, subject:"Break" };
+      if (time==="12:00-13:00") return { time, subject:"Lunch" };
+      const idx = (seed + di*3 + pi*2) % pool.length;
+      return { time, subject: pool[idx] };
+    })
+  }));
+}
+
+const TIMETABLES = CLASSES.reduce((acc,cls)=>{ acc[cls]=generateTimetable(cls); return acc; },{});
 
 const AUDIT_LOG_INITIAL = [
   { id:"AUD001", user:"ADM001", action:"System Setup",        section:"Settings", timestamp:"2025-01-01 08:00:00" },
@@ -211,8 +222,8 @@ function Row({ label, children }) {
   );
 }
 
-function Card({ children, style }) {
-  return <div style={{ background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.08)",...style }}>{children}</div>;
+function Card({ children, style, className }) {
+  return <div className={className} style={{ background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.08)",...style }}>{children}</div>;
 }
 
 function StatCard({ icon, label, value, color, sub }) {
@@ -276,6 +287,7 @@ export default function EduSmart() {
   const [pin,       setPin]       = useState("");
   const [authErr,   setAuthErr]   = useState("");
   const [section,   setSection]   = useState("dashboard");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [notif,     setNotif]     = useState(null);
   const [lastActivity, setLastActivity] = useState(Date.now());
   const [failedLogins, setFailedLogins] = useState({});
@@ -434,16 +446,31 @@ export default function EduSmart() {
 
   return (
     <div style={{ display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',sans-serif",background:"#f1f5f9" }}>
+      <style>{`
+        @media (max-width: 860px) {
+          .edusmart-sidebar { position:fixed !important; left:0; top:0; height:100vh; z-index:400;
+            transform: translateX(${mobileNavOpen?"0":"-100%"}); transition: transform 0.25s ease; box-shadow: 4px 0 20px rgba(0,0,0,0.3); }
+          .edusmart-hamburger { display:flex !important; }
+          .edusmart-main-pad { padding:14px !important; padding-bottom:70px !important; }
+          .edusmart-overlay { display:${mobileNavOpen?"block":"none"} !important; }
+        }
+      `}</style>
+      {/* MOBILE OVERLAY */}
+      <div className="edusmart-overlay" onClick={()=>setMobileNavOpen(false)}
+        style={{ display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:399 }}/>
+
       {/* SIDEBAR */}
-      <div style={{ width:210,background:"#0f172a",display:"flex",flexDirection:"column",position:"sticky",top:0,height:"100vh",overflowY:"auto",flexShrink:0 }}>
-        <div style={{ padding:"18px 14px 12px",borderBottom:"1px solid #1e293b" }}>
-          <div style={{ fontSize:20,fontWeight:700,color:"#fff" }}>🏫 EduSmart</div>
-          <div style={{ fontSize:11,color:"#64748b",marginTop:2 }}>{school.name}</div>
-          <div style={{ fontSize:11,color:"#475569" }}>{school.currentTerm} · {school.currentYear}</div>
+      <div className="edusmart-sidebar" style={{ width:210,background:"#0f172a",display:"flex",flexDirection:"column",position:"sticky",top:0,height:"100vh",overflowY:"auto",flexShrink:0 }}>
+        <div style={{ padding:"18px 14px 12px",borderBottom:"1px solid #1e293b",display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
+          <div>
+            <div style={{ fontSize:20,fontWeight:700,color:"#fff" }}>🏫 EduSmart</div>
+            <div style={{ fontSize:11,color:"#64748b",marginTop:2 }}>{school.name}</div>
+            <div style={{ fontSize:11,color:"#475569" }}>{school.currentTerm} · {school.currentYear}</div>
+          </div>
         </div>
         <div style={{ padding:"8px 0",flex:1 }}>
           {navItems.map(n=>(
-            <button key={n.key} onClick={()=>setSection(n.key)}
+            <button key={n.key} onClick={()=>{setSection(n.key);setMobileNavOpen(false);}}
               style={{ display:"block",width:"100%",textAlign:"left",padding:"9px 16px",
                 background:section===n.key?"#1e40af":"transparent",
                 color:section===n.key?"#fff":"#94a3b8",border:"none",cursor:"pointer",fontSize:13,
@@ -462,9 +489,14 @@ export default function EduSmart() {
 
       {/* MAIN */}
       <div style={{ flex:1,overflow:"auto" }}>
+        {/* MOBILE TOP BAR */}
+        <div className="edusmart-hamburger" style={{ display:"none",alignItems:"center",gap:10,padding:"12px 16px",background:"#0f172a",position:"sticky",top:0,zIndex:100 }}>
+          <button onClick={()=>setMobileNavOpen(true)} style={{ background:"none",border:"none",color:"#fff",fontSize:22,cursor:"pointer",padding:"2px 8px" }}>☰</button>
+          <div style={{ color:"#fff",fontSize:14,fontWeight:700 }}>🏫 EduSmart</div>
+        </div>
         {notif&&<div style={{ position:"fixed",top:16,right:16,zIndex:9999,padding:"12px 20px",borderRadius:10,
           background:notif.type==="success"?"#16a34a":"#dc2626",color:"#fff",fontSize:13,boxShadow:"0 4px 12px rgba(0,0,0,0.3)" }}>{notif.msg}</div>}
-        <div style={{ padding:24 }}>
+        <div className="edusmart-main-pad" style={{ padding:24 }}>
           {section==="dashboard"    && <Dashboard    {...sharedProps}/>}
           {section==="students"     && <Students     {...sharedProps}/>}
           {section==="nursery"      && <Nursery      {...sharedProps}/>}
@@ -1990,6 +2022,13 @@ function Reports({ students,grades,attendance,fees,expenses,school }) {
 
   return (
     <div>
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          .report-card-print, .report-card-print * { visibility: visible; }
+          .report-card-print { position: relative; margin: 0 auto; }
+        }
+      `}</style>
       <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>📋 Reports</h2>
       <Tabs tabs={[{key:"student",label:"Student Report Card"},{key:"class",label:"Class Report"},{key:"subject",label:"Subject Analysis"},{key:"school",label:"School Dashboard"}]} active={rt} onChange={setRt}/>
 
@@ -2003,7 +2042,7 @@ function Reports({ students,grades,attendance,fees,expenses,school }) {
           {ss&&(()=>{
             const stu=students.find(s=>s.id===ss); const sGrades=sg(ss,st); const av=avg(sGrades); const att=attRate(ss);
             return (
-              <Card style={{ padding:28 }}>
+              <Card className="report-card-print" style={{ padding:28 }}>
                 <div style={{ textAlign:"center",marginBottom:16,borderBottom:"2px solid #1e40af",paddingBottom:14 }}>
                   <div style={{ fontSize:20,fontWeight:700,color:"#0f172a" }}>{school.name}</div>
                   <div style={{ fontSize:12,color:"#64748b" }}>{school.address} | {school.phone}</div>
@@ -2145,6 +2184,13 @@ function IDCards({ students,users,school }) {
 
   return (
     <div>
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          .id-card-print, .id-card-print * { visibility: visible; }
+          .id-card-print { position: relative; page-break-inside: avoid; margin: 0 auto 16px; }
+        }
+      `}</style>
       <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>🪪 ID Card Generator</h2>
       <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
         <select value={type} onChange={e=>{setType(e.target.value);setSelId("");setPreview(null);}} style={{ ...inp,width:140 }}><option value="student">Student</option><option value="staff">Staff</option></select>
@@ -2174,10 +2220,35 @@ function IDCards({ students,users,school }) {
   );
 }
 
+// Deterministic pseudo-QR pattern generated from the person's ID — a visual
+// verification pattern unique to each ID. Not a scannable QR code (that needs
+// a dedicated QR library/printer setup), but consistent, unique per-person,
+// and much better than a plain placeholder square.
+function pseudoQrCells(seedStr, gridSize=7) {
+  let seed=0; for(let i=0;i<seedStr.length;i++) seed=(seed*31+seedStr.charCodeAt(i))>>>0;
+  const rand=()=>{ seed=(seed*1103515245+12345)>>>0; return (seed>>>16)&0xff; };
+  const cells=[];
+  for(let r=0;r<gridSize;r++){ const row=[]; for(let c=0;c<gridSize;c++){ row.push(rand()%3===0); } cells.push(row); }
+  return cells;
+}
+function PseudoQR({ id, size=44, dark="#0f172a" }) {
+  const grid=7; const cells=pseudoQrCells(id,grid); const cell=size/grid;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ borderRadius:4 }}>
+      <rect width={size} height={size} fill={dark}/>
+      {cells.map((row,r)=>row.map((on,c)=>on?<rect key={`${r}-${c}`} x={c*cell} y={r*cell} width={cell} height={cell} fill="#fff"/>:null))}
+      {/* corner markers, like a real QR's finder patterns */}
+      {[[0,0],[grid-2,0],[0,grid-2]].map(([cx,cy],i)=>(
+        <rect key={i} x={cx*cell} y={cy*cell} width={cell*2} height={cell*2} fill="none" stroke="#fff" strokeWidth={1}/>
+      ))}
+    </svg>
+  );
+}
+
 function IDCard({ person,type,school,roleColors }) {
   const bg=type==="staff"?(roleColors[person.role]||"#1e40af"):"#1e40af";
   return (
-    <div style={{ width:300,borderRadius:14,overflow:"hidden",boxShadow:"0 4px 16px rgba(0,0,0,0.15)",fontFamily:"'Segoe UI',sans-serif" }}>
+    <div className="id-card-print" style={{ width:300,borderRadius:14,overflow:"hidden",boxShadow:"0 4px 16px rgba(0,0,0,0.15)",fontFamily:"'Segoe UI',sans-serif" }}>
       <div style={{ background:bg,padding:"14px 18px",color:"#fff" }}>
         <div style={{ fontSize:14,fontWeight:700 }}>{school.name}</div>
         <div style={{ fontSize:10,opacity:0.8 }}>{school.motto}</div>
@@ -2193,7 +2264,7 @@ function IDCard({ person,type,school,roleColors }) {
       <div style={{ background:"#f8fafc",padding:"8px 18px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
         <div><div style={{ fontSize:9,color:"#94a3b8" }}>ID</div><div style={{ fontSize:12,fontWeight:700,color:"#1e40af",letterSpacing:1 }}>{person.id}</div></div>
         {type==="staff"&&<div><div style={{ fontSize:9,color:"#94a3b8" }}>CODE</div><div style={{ fontSize:12,fontWeight:700,color:bg }}>{person.code}</div></div>}
-        <div style={{ width:44,height:44,background:"#0f172a",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,color:"#fff",padding:3,textAlign:"center" }}>QR{"\n"}{person.id}</div>
+        <PseudoQR id={person.id} size={44}/>
       </div>
     </div>
   );
@@ -2265,9 +2336,15 @@ function AuditLog({ auditLog,users }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────
-function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo }) {
+function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
+  students,setStudents,grades,setGrades,mockExams,setMockExams,attendance,setAttendance,
+  fees,setFees,expenses,setExpenses,payroll,setPayroll,books,setBooks,borrows,setBorrows,
+  nurseryLogs,setNurseryLogs,milestones,setMilestones,examSchedule,setExamSchedule,
+  timetables,setTimetables,auditLog,setAuditLog }) {
   const [form,setForm]=useState({...school}); const [tab,setTab]=useState("school");
   const [resetId,setResetId]=useState(""); const [newPin,setNewPin]=useState("");
+  const [importFile,setImportFile]=useState(null); const [importErr,setImportErr]=useState("");
+  const fileInputRef = useRef(null);
 
   const save=()=>{ setSchool({...form}); addAudit("Updated school settings","Settings"); notify("Settings saved ✅"); };
 
@@ -2278,11 +2355,50 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo }) {
   };
 
   const exportData=()=>{
-    const data={ school,users,exportDate:nowStr(),version:"5.0" };
+    const data={ version:"5.1", exportDate:nowStr(),
+      school,users,students,grades,mockExams,attendance,fees,expenses,payroll,books,borrows,
+      nurseryLogs,milestones,examSchedule,timetables,auditLog };
     const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a"); a.href=url; a.download=`EduSmart_Backup_${todayStr()}.json`; a.click();
-    notify("Data exported ✅"); addAudit("Data exported","Settings");
+    notify("Full data exported ✅"); addAudit("Full data exported","Settings");
+  };
+
+  const handleImportFile=(e)=>{
+    const file=e.target.files?.[0]; if(!file) return;
+    setImportErr("");
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      try{
+        const data=JSON.parse(ev.target.result);
+        if(!data.school||!data.users){ setImportErr("This doesn't look like a valid EduSmart backup file."); return; }
+        setImportFile(data);
+      }catch(err){ setImportErr("Could not read this file — make sure it's a valid EduSmart JSON backup."); }
+    };
+    reader.readAsText(file);
+  };
+
+  const confirmRestore=()=>{
+    if(!importFile) return;
+    const d=importFile;
+    setSchool(d.school||school); setUsers(d.users||users);
+    if(d.students) setStudents(d.students);
+    if(d.grades) setGrades(d.grades);
+    if(d.mockExams) setMockExams(d.mockExams);
+    if(d.attendance) setAttendance(d.attendance);
+    if(d.fees) setFees(d.fees);
+    if(d.expenses) setExpenses(d.expenses);
+    if(d.payroll) setPayroll(d.payroll);
+    if(d.books) setBooks(d.books);
+    if(d.borrows) setBorrows(d.borrows);
+    if(d.nurseryLogs) setNurseryLogs(d.nurseryLogs);
+    if(d.milestones) setMilestones(d.milestones);
+    if(d.examSchedule) setExamSchedule(d.examSchedule);
+    if(d.timetables) setTimetables(d.timetables);
+    if(d.auditLog) setAuditLog(d.auditLog);
+    addAudit(`Restored backup from ${d.exportDate||"unknown date"}`,"Settings");
+    notify("Backup restored ✅"); setImportFile(null);
+    if(fileInputRef.current) fileInputRef.current.value="";
   };
 
   return (
@@ -2328,11 +2444,23 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo }) {
       {tab==="data"&&(
         <Card style={{ padding:24,maxWidth:480 }}>
           <h3 style={{ margin:"0 0 12px",fontSize:16 }}>Data Export & Backup</h3>
-          <p style={{ fontSize:13,color:"#64748b",marginBottom:16 }}>Export school data as a JSON backup file. Store it safely.</p>
-          <button onClick={exportData} style={{ ...btnP,marginBottom:16 }}>📥 Export All Data (JSON)</button>
-          <div style={{ background:"#fff7ed",borderRadius:8,padding:12,fontSize:12,color:"#9a3412" }}>
-            ⚠️ Data is stored in your browser. Export regularly to avoid data loss if the browser is cleared.
+          <p style={{ fontSize:13,color:"#64748b",marginBottom:16 }}>Export a complete backup — students, staff, grades, attendance, fees, payroll, library, nursery logs, timetables and audit log all included.</p>
+          <button onClick={exportData} style={{ ...btnP,marginBottom:16 }}>📥 Export Full Backup (JSON)</button>
+          <div style={{ background:"#fff7ed",borderRadius:8,padding:12,fontSize:12,color:"#9a3412",marginBottom:24 }}>
+            ⚠️ Data is stored in your browser only. Export regularly — clearing browser data or switching devices will lose everything not backed up.
           </div>
+
+          <h3 style={{ margin:"0 0 12px",fontSize:16,borderTop:"1px solid #e5e7eb",paddingTop:20 }}>Restore from Backup</h3>
+          <p style={{ fontSize:13,color:"#64748b",marginBottom:12 }}>Upload a previously exported EduSmart JSON file to restore all data. This replaces current data for any section included in the backup.</p>
+          <input ref={fileInputRef} type="file" accept="application/json" onChange={handleImportFile} style={{ ...inp,padding:8 }}/>
+          {importErr&&<p style={{ color:"#dc2626",fontSize:12,marginTop:8 }}>{importErr}</p>}
+          {importFile&&(
+            <div style={{ background:"#eff6ff",borderRadius:8,padding:12,marginTop:12,fontSize:12,color:"#1e40af" }}>
+              <div><strong>Backup found:</strong> exported {importFile.exportDate||"unknown date"}</div>
+              <div>{importFile.students?.length||0} students, {importFile.users?.length||0} staff, {importFile.grades?.length||0} grade records, {importFile.fees?.length||0} fee records</div>
+              <button onClick={confirmRestore} style={{ ...btnP,marginTop:10,background:"#dc2626" }}>⚠️ Confirm Restore (Overwrites Current Data)</button>
+            </div>
+          )}
         </Card>
       )}
 
