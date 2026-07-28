@@ -10,9 +10,9 @@ const LICENCE_KEYS = {
 
 // ─── ROLE ACCESS ─────────────────────────────────────────────
 const ROLE_ACCESS = {
-  "Admin":                ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","exams"],
-  "Headmaster":           ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","exams"],
-  "HOD":                  ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","exams"],
+  "Admin":                ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","exams","promotion"],
+  "Headmaster":           ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","exams","promotion"],
+  "HOD":                  ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","exams","promotion"],
   "Teacher":              ["dashboard","grades","attendance","timetable","exams","communication"],
   "Account Office":       ["finance","payroll"],
   "Librarian":            ["library"],
@@ -167,6 +167,36 @@ function generateTimetable(cls) {
 }
 
 const TIMETABLES = CLASSES.reduce((acc,cls)=>{ acc[cls]=generateTimetable(cls); return acc; },{});
+
+// ─── PROMOTION MAPPING ────────────────────────────────────────
+// Defines what class a student moves into after passing the academic year.
+// Single-stream levels move straight to the next single-stream level.
+// Streamed levels (Class 1–6, A/B) keep their stream letter going up.
+// Class 6 (both streams) merges into JHS 1, which has no streams.
+// JHS 3 passers graduate out of the roll entirely.
+const PROMOTION_MAP = {
+  "Creche":"Nursery 1", "Nursery 1":"Nursery 2", "Nursery 2":"KG 1", "KG 1":"KG 2",
+  "Class 1A":"Class 2A", "Class 1B":"Class 2B",
+  "Class 2A":"Class 3A", "Class 2B":"Class 3B",
+  "Class 3A":"Class 4A", "Class 3B":"Class 4B",
+  "Class 4A":"Class 5A", "Class 4B":"Class 5B",
+  "Class 5A":"Class 6A", "Class 5B":"Class 6B",
+  "Class 6A":"JHS 1", "Class 6B":"JHS 1",
+  "JHS 1":"JHS 2", "JHS 2":"JHS 3",
+  // "JHS 3" has no entry here — it's handled as graduation, not a class move.
+};
+// KG 2 splits its single class into the two Class 1 streams (alternating so
+// they come out roughly balanced) since Class 1 is the first streamed level.
+function nextClassFor(currentClass, indexInBatch) {
+  if (currentClass === "KG 2") return indexInBatch % 2 === 0 ? "Class 1A" : "Class 1B";
+  return PROMOTION_MAP[currentClass] || null;
+}
+function nextAcademicYear(yearStr) {
+  const m = /^(\d{4})\/(\d{4})$/.exec(yearStr||"");
+  if (!m) return yearStr;
+  return `${+m[1]+1}/${+m[2]+1}`;
+}
+
 
 const AUDIT_LOG_INITIAL = [
   { id:"AUD001", user:"ADM001", action:"System Setup",        section:"Settings", timestamp:"2025-01-01 08:00:00" },
@@ -423,6 +453,7 @@ export default function EduSmart() {
     { key:"staff",         label:"Staff",          icon:"👥" },
     { key:"grades",        label:"Grades",         icon:"📝" },
     { key:"exams",         label:"Exams",          icon:"📖" },
+    { key:"promotion",     label:"Promotion",      icon:"🎓" },
     { key:"attendance",    label:"Attendance",     icon:"✅" },
     { key:"finance",       label:"Finance",        icon:"💰" },
     { key:"payroll",       label:"Payroll",        icon:"💼" },
@@ -503,6 +534,7 @@ export default function EduSmart() {
           {section==="staff"        && <Staff        {...sharedProps}/>}
           {section==="grades"       && <Grades       {...sharedProps}/>}
           {section==="exams"        && <Exams        {...sharedProps}/>}
+          {section==="promotion"    && <Promotion    {...sharedProps}/>}
           {section==="attendance"   && <Attendance   {...sharedProps}/>}
           {section==="finance"      && <Finance      {...sharedProps}/>}
           {section==="payroll"      && <Payroll      {...sharedProps}/>}
@@ -1164,6 +1196,175 @@ function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,cu
     </div>
   );
 }
+
+// ─── PROMOTION ───────────────────────────────────────────────
+function Promotion({ students,setStudents,grades,school,setSchool,curUser,notify,addAudit }) {
+  const [passMark,setPassMark]=useState(50);
+  const [evalYear,setEvalYear]=useState(school.currentYear);
+  const [preview,setPreview]=useState(null); // array of { student, avg, hasData, defaultResult, override }
+  const [showConfirm,setShowConfirm]=useState(false);
+  const [done,setDone]=useState(null); // summary after running
+
+  const activeStudents = students.filter(s=>s.status==="active");
+
+  const buildPreview = () => {
+    // group by class to compute batch index for KG2 -> Class1A/1B split
+    const byClass = {};
+    activeStudents.forEach(s=>{ (byClass[s.class]=byClass[s.class]||[]).push(s); });
+
+    const rows = [];
+    Object.entries(byClass).forEach(([cls,list])=>{
+      list.forEach((s,idx)=>{
+        const sGrades = grades.filter(g=>g.studentId===s.id && g.year===evalYear);
+        const hasData = sGrades.length>0;
+        const avg = hasData ? Math.round(sGrades.reduce((a,g)=>a+g.score,0)/sGrades.length) : null;
+        const willPass = hasData ? avg>=passMark : false;
+        const isJHS3 = cls==="JHS 3";
+        let defaultResult;
+        if (!hasData) defaultResult = "Review"; // no grades on record — needs manual decision
+        else if (isJHS3) defaultResult = willPass ? "Graduate" : "Repeat";
+        else defaultResult = willPass ? "Promote" : "Repeat";
+        const nextClass = isJHS3 ? null : (willPass ? nextClassFor(cls, idx) : cls);
+        rows.push({ student:s, currentClass:cls, avg, hasData, defaultResult, nextClass, override:defaultResult });
+      });
+    });
+    rows.sort((a,b)=>a.currentClass.localeCompare(b.currentClass)||a.student.name.localeCompare(b.student.name));
+    setPreview(rows); setDone(null);
+  };
+
+  const setOverride = (studentId, value) => {
+    setPreview(prev=>prev.map(r=>r.student.id===studentId?{...r,override:value}:r));
+  };
+
+  const counts = preview ? {
+    Promote: preview.filter(r=>r.override==="Promote").length,
+    Graduate: preview.filter(r=>r.override==="Graduate").length,
+    Repeat: preview.filter(r=>r.override==="Repeat").length,
+    Review: preview.filter(r=>r.override==="Review").length,
+  } : null;
+
+  const runPromotion = () => {
+    if (!preview) return;
+    let byClass = {}; // recompute nextClass for Promote rows honoring KG2 split order at execution time
+    const classCounters = {};
+    setStudents(prevStudents=>{
+      const map = new Map(prevStudents.map(s=>[s.id,{...s}]));
+      preview.forEach(r=>{
+        const s = map.get(r.student.id); if(!s) return;
+        if (r.override==="Graduate") { s.status="graduated"; }
+        else if (r.override==="Promote") {
+          const idx = classCounters[r.currentClass] = (classCounters[r.currentClass]||0);
+          classCounters[r.currentClass]++;
+          const nc = nextClassFor(r.currentClass, idx);
+          if (nc) s.class = nc;
+        }
+        // "Repeat" and "Review" leave the student's class unchanged
+      });
+      return Array.from(map.values());
+    });
+    const newYear = nextAcademicYear(school.currentYear);
+    setSchool(prev=>({ ...prev, currentYear:newYear, currentTerm:"Term 1" }));
+    addAudit(`Year-end promotion run: ${counts.Promote} promoted, ${counts.Graduate} graduated, ${counts.Repeat} repeated, ${counts.Review} flagged for review. New year: ${newYear}`,"Promotion");
+    setDone({ ...counts, newYear });
+    notify("Promotion completed ✅");
+    setShowConfirm(false);
+  };
+
+  const resultColor = r=>r==="Promote"?"#16a34a":r==="Graduate"?"#7c3aed":r==="Repeat"?"#dc2626":"#d97706";
+  const resultBg = r=>r==="Promote"?"#dcfce7":r==="Graduate"?"#ede9fe":r==="Repeat"?"#fee2e2":"#fef3c7";
+
+  return (
+    <div>
+      <h2 style={{ margin:"0 0 8px",fontSize:20,fontWeight:700,color:"#0f172a" }}>🎓 Year-End Promotion</h2>
+      <p style={{ margin:"0 0 16px",fontSize:13,color:"#64748b" }}>
+        Automatically promotes students who meet the pass mark to their next class, moves JHS 3 passers to Graduated, and leaves students below the pass mark in their current class to repeat. Review every result before confirming — nothing is applied until you click Confirm.
+      </p>
+
+      {done&&(
+        <Card style={{ padding:20,marginBottom:20,borderLeft:"4px solid #16a34a" }}>
+          <h3 style={{ margin:"0 0 10px",fontSize:15,color:"#166534" }}>✅ Promotion completed</h3>
+          <div style={{ display:"flex",gap:20,fontSize:13,flexWrap:"wrap" }}>
+            <div><strong style={{ color:"#16a34a" }}>{done.Promote}</strong> promoted</div>
+            <div><strong style={{ color:"#7c3aed" }}>{done.Graduate}</strong> graduated</div>
+            <div><strong style={{ color:"#dc2626" }}>{done.Repeat}</strong> repeating</div>
+            <div><strong style={{ color:"#d97706" }}>{done.Review}</strong> flagged for review (unchanged)</div>
+          </div>
+          <p style={{ fontSize:12,color:"#64748b",marginTop:8 }}>Academic year advanced to <strong>{done.newYear}</strong>, Term 1. Check Students and Archive to confirm class assignments.</p>
+        </Card>
+      )}
+
+      {!preview&&(
+        <Card style={{ padding:20,maxWidth:480 }}>
+          <Row label="Academic Year to Evaluate">
+            <input value={evalYear} onChange={e=>setEvalYear(e.target.value)} style={inp}/>
+          </Row>
+          <Row label="Pass Mark (average score % required)">
+            <input type="number" min={0} max={100} value={passMark} onChange={e=>setPassMark(+e.target.value)} style={inp}/>
+          </Row>
+          <div style={{ background:"#f0f9ff",borderRadius:8,padding:12,fontSize:12,color:"#0369a1",marginBottom:14 }}>
+            A student's average is calculated across all grade entries recorded for them in <strong>{evalYear}</strong>. Students with no grades on record are flagged <strong>Review</strong> rather than auto-promoted or held back.
+          </div>
+          <button onClick={buildPreview} style={{ ...btnP,width:"100%" }}>Build Promotion Preview</button>
+        </Card>
+      )}
+
+      {preview&&!done&&(
+        <div>
+          <div style={{ display:"flex",gap:10,marginBottom:14,flexWrap:"wrap",alignItems:"center" }}>
+            <StatCard icon="✅" label="Promote" value={counts.Promote} color="#16a34a"/>
+            <StatCard icon="🎓" label="Graduate" value={counts.Graduate} color="#7c3aed"/>
+            <StatCard icon="🔁" label="Repeat" value={counts.Repeat} color="#dc2626"/>
+            <StatCard icon="⚠️" label="Review" value={counts.Review} color="#d97706"/>
+          </div>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+            <p style={{ margin:0,fontSize:12,color:"#64748b" }}>Change any student's outcome using the dropdown before confirming.</p>
+            <div style={{ display:"flex",gap:8 }}>
+              <button onClick={()=>setPreview(null)} style={btnS}>Back</button>
+              <button onClick={()=>setShowConfirm(true)} style={{ ...btnP,background:"#7c3aed" }}>Confirm & Run Promotion</button>
+            </div>
+          </div>
+          <Table cols={["Student","Current Class","Avg Score","Data?","Next Class","Result"]}
+            rows={preview.map(r=>(
+              <tr key={r.student.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                <TD bold>{r.student.name}</TD>
+                <TD small>{r.currentClass}</TD>
+                <TD bold color={r.avg===null?"#9ca3af":r.avg>=passMark?"#16a34a":"#dc2626"}>{r.avg===null?"—":r.avg+"%"}</TD>
+                <td style={{ padding:"8px 12px" }}>{r.hasData?<Badge text="Yes" color="#166534" bg="#dcfce7"/>:<Badge text="No grades" color="#92400e" bg="#fef3c7"/>}</td>
+                <TD small color="#6b7280">{r.override==="Promote"?(r.currentClass==="JHS 3"?"—":(nextClassFor(r.currentClass,0)||"—")):r.override==="Graduate"?"Graduated":r.currentClass}</TD>
+                <td style={{ padding:"6px 12px" }}>
+                  <select value={r.override} onChange={e=>setOverride(r.student.id,e.target.value)}
+                    style={{ padding:"5px 8px",borderRadius:6,border:"1.5px solid #d1d5db",fontSize:12,fontWeight:600,
+                      color:resultColor(r.override),background:resultBg(r.override) }}>
+                    {r.currentClass==="JHS 3"
+                      ? <><option value="Graduate">Graduate</option><option value="Repeat">Repeat</option><option value="Review">Review</option></>
+                      : <><option value="Promote">Promote</option><option value="Repeat">Repeat</option><option value="Review">Review</option></>}
+                  </select>
+                </td>
+              </tr>
+            ))} emptyMsg="No active students found."/>
+        </div>
+      )}
+
+      {showConfirm&&(
+        <Modal title="Confirm Year-End Promotion" onClose={()=>setShowConfirm(false)}>
+          <p style={{ fontSize:13,color:"#374151",marginBottom:14 }}>This will immediately update class assignments for all affected students and cannot be automatically undone. Please confirm the numbers below are correct.</p>
+          <div style={{ background:"#fef2f2",borderRadius:8,padding:14,fontSize:13,lineHeight:2,marginBottom:14 }}>
+            <div><strong style={{ color:"#16a34a" }}>{counts.Promote}</strong> students will be promoted to their next class</div>
+            <div><strong style={{ color:"#7c3aed" }}>{counts.Graduate}</strong> JHS 3 students will be marked Graduated</div>
+            <div><strong style={{ color:"#dc2626" }}>{counts.Repeat}</strong> students will repeat their current class</div>
+            <div><strong style={{ color:"#d97706" }}>{counts.Review}</strong> students are flagged for manual review and will be left unchanged</div>
+            <div style={{ marginTop:6 }}>Academic year will advance from <strong>{school.currentYear}</strong> to <strong>{nextAcademicYear(school.currentYear)}</strong>, Term 1.</div>
+          </div>
+          <div style={{ display:"flex",justifyContent:"flex-end",gap:8 }}>
+            <button onClick={()=>setShowConfirm(false)} style={btnS}>Cancel</button>
+            <button onClick={runPromotion} style={{ ...btnP,background:"#dc2626" }}>⚠️ Yes, Run Promotion</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 
 // ─── ATTENDANCE ──────────────────────────────────────────────
 function Attendance({ attendance,setAttendance,students,curUser,notify,addAudit }) {
