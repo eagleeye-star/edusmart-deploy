@@ -10,9 +10,9 @@ const LICENCE_KEYS = {
 
 // ─── ROLE ACCESS ─────────────────────────────────────────────
 const ROLE_ACCESS = {
-  "Admin":                ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","exams","promotion"],
-  "Headmaster":           ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","exams","promotion"],
-  "HOD":                  ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","exams","promotion"],
+  "Admin":                ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","kindergarten","exams","promotion","history"],
+  "Headmaster":           ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","kindergarten","exams","promotion","history"],
+  "HOD":                  ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","kindergarten","exams","promotion","history"],
   "Teacher":              ["dashboard","grades","attendance","timetable","exams","communication"],
   "Account Office":       ["finance","payroll"],
   "Librarian":            ["library"],
@@ -21,12 +21,24 @@ const ROLE_ACCESS = {
 
 const ROLES = ["Admin","Headmaster","HOD","Teacher","Account Office","Librarian","Non-Teaching Staff"];
 
-const CLASSES = ["Creche","Nursery 1","Nursery 2","KG 1","KG 2","Class 1A","Class 1B","Class 2A","Class 2B","Class 3A","Class 3B","Class 4A","Class 4B","Class 5A","Class 5B","Class 6A","Class 6B","JHS 1","JHS 2","JHS 3"];
-const KG_CLASSES = ["Creche","Nursery 1","Nursery 2","KG 1","KG 2"];
+const DEFAULT_CLASSES = ["Creche","Nursery 1","Nursery 2","KG 1","KG 2","Class 1A","Class 1B","Class 2A","Class 2B","Class 3A","Class 3B","Class 4A","Class 4B","Class 5A","Class 5B","Class 6A","Class 6B","JHS 1","JHS 2","JHS 3"];
+const NURSERY_CLASSES = ["Creche","Nursery 1","Nursery 2"];
+const KINDERGARTEN_CLASSES = ["KG 1","KG 2"];
+const KG_CLASSES = NURSERY_CLASSES.concat(KINDERGARTEN_CLASSES); // legacy combined group — still used for fee-band/section logic
 const PRIMARY_CLASSES = ["Class 1A","Class 1B","Class 2A","Class 2B","Class 3A","Class 3B","Class 4A","Class 4B","Class 5A","Class 5B","Class 6A","Class 6B"];
 const JHS_CLASSES = ["JHS 1","JHS 2","JHS 3"];
-const SUBJECTS = ["Mathematics","English Language","Science","Social Studies","ICT","French","RME","Creative Arts","Ghanaian Language","Physical Education","History","Pre-Technical Skills"];
-const EXAM_SUBJECTS = ["Mathematics","English Language","Science","Social Studies","ICT","French","RME","Creative Arts","Ghanaian Language"];
+const CLASS_LEVELS = ["Nursery","Kindergarten","Primary","JHS"];
+// Maps every default class to its level, so admin-added classes can be
+// slotted into the right level too (stored the same way in classLevels state).
+const DEFAULT_CLASS_LEVELS = {};
+NURSERY_CLASSES.forEach(c=>DEFAULT_CLASS_LEVELS[c]="Nursery");
+KINDERGARTEN_CLASSES.forEach(c=>DEFAULT_CLASS_LEVELS[c]="Kindergarten");
+PRIMARY_CLASSES.forEach(c=>DEFAULT_CLASS_LEVELS[c]="Primary");
+JHS_CLASSES.forEach(c=>DEFAULT_CLASS_LEVELS[c]="JHS");
+
+const DEFAULT_SUBJECTS = ["Mathematics","English Language","Science","Social Studies","ICT","French","RME","Creative Arts","Ghanaian Language","Physical Education","History","Pre-Technical Skills"];
+const NON_EXAM_SUBJECTS = ["Physical Education","Creative Arts"]; // excluded from formal exam scheduling
+function getExamSubjects(subjectList) { return subjectList.filter(s=>!NON_EXAM_SUBJECTS.includes(s)); }
 
 const MILESTONE_CATEGORIES = {
   "Motor Skills":    ["Crawling","Walking steadily","Running","Jumping","Climbing stairs","Holding pencil","Drawing shapes","Using scissors","Stacking blocks","Self-feeding"],
@@ -142,15 +154,17 @@ const INITIAL_EXAM_SCHEDULE = [
 
 // Auto-generate a Monday-Friday timetable for every class so all 20 classes
 // (Creche through JHS 3) have a starting timetable instead of just 2 hardcoded ones.
-// Admin/HOD can still edit any cell via the Timetable Builder.
-function generateTimetable(cls) {
-  const isKG = KG_CLASSES.includes(cls);
-  const isJHS = JHS_CLASSES.includes(cls);
+// Admin/HOD can still edit any cell via the Timetable Builder. `subjectList` and
+// `levelOf` let this work for admin-added classes too (see Settings > Classes & Subjects).
+function generateTimetable(cls, subjectList, levelOf) {
+  const level = levelOf ? levelOf(cls) : (DEFAULT_CLASS_LEVELS[cls] || "Primary");
+  const isKG = level === "Nursery" || level === "Kindergarten";
+  const isJHS = level === "JHS";
   const slots = isKG
     ? ["7:30-8:15","8:15-9:00","9:00-9:45","9:45-10:15","10:15-11:00","11:00-12:00","12:00-13:00","13:00-13:45"]
     : ["7:30-8:30","8:30-9:30","9:30-10:30","10:30-11:00","11:00-12:00","12:00-13:00","13:00-14:00","14:00-15:00"];
   const kgSubjects = ["Number Work","Literacy","Creative Play","Break","Music & Movement","Lunch","Story Time","Outdoor Play"];
-  const pool = isJHS ? EXAM_SUBJECTS.concat(["Pre-Technical Skills","Physical Education"]) : SUBJECTS;
+  const pool = isJHS ? getExamSubjects(subjectList).concat(["Pre-Technical Skills","Physical Education"]) : subjectList;
   const days = ["Monday","Tuesday","Wednesday","Thursday","Friday"];
   // Simple deterministic rotation per class so each class gets a distinct but stable pattern
   const seed = cls.split("").reduce((a,c)=>a+c.charCodeAt(0),0);
@@ -160,13 +174,14 @@ function generateTimetable(cls) {
       if (isKG) return { time, subject: kgSubjects[pi] };
       if (time==="10:30-11:00") return { time, subject:"Break" };
       if (time==="12:00-13:00") return { time, subject:"Lunch" };
-      const idx = (seed + di*3 + pi*2) % pool.length;
+      const idx = (seed + di*3 + pi*2) % (pool.length||1);
       return { time, subject: pool[idx] };
     })
   }));
 }
 
-const TIMETABLES = CLASSES.reduce((acc,cls)=>{ acc[cls]=generateTimetable(cls); return acc; },{});
+const DEFAULT_TIMETABLES = DEFAULT_CLASSES.reduce((acc,cls)=>{ acc[cls]=generateTimetable(cls, DEFAULT_SUBJECTS); return acc; },{});
+
 
 // ─── PROMOTION MAPPING ────────────────────────────────────────
 // Defines what class a student moves into after passing the academic year.
@@ -252,6 +267,44 @@ function Row({ label, children }) {
   );
 }
 
+// Reusable photo picker: reads the chosen image as a base64 data URL (kept small
+// via canvas downscaling) so it can sit directly in the record and print on ID cards.
+function PhotoUpload({ value, onChange, size=90 }) {
+  const inputRef = useRef(null);
+  const handleFile = (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        // downscale to keep stored size reasonable across hundreds of records
+        const maxDim = 300;
+        const scale = Math.min(1, maxDim/Math.max(img.width,img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width*scale; canvas.height = img.height*scale;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        onChange(canvas.toDataURL("image/jpeg", 0.8));
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+  return (
+    <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+      <div onClick={()=>inputRef.current?.click()} style={{ width:size,height:size,borderRadius:10,background:"#f1f5f9",
+        border:"1.5px dashed #cbd5e1",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden",flexShrink:0 }}>
+        {value ? <img src={value} alt="" style={{ width:"100%",height:"100%",objectFit:"cover" }}/> : <span style={{ fontSize:22,color:"#94a3b8" }}>📷</span>}
+      </div>
+      <div>
+        <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} style={{ display:"none" }}/>
+        <button type="button" onClick={()=>inputRef.current?.click()} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8",padding:"6px 12px" }}>{value?"Change Photo":"Upload Photo"}</button>
+        {value && <button type="button" onClick={()=>onChange("")} style={{ ...btnSm,background:"#fee2e2",color:"#991b1b",padding:"6px 12px",marginLeft:6 }}>Remove</button>}
+      </div>
+    </div>
+  );
+}
+
 function Card({ children, style, className }) {
   return <div className={className} style={{ background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.08)",...style }}>{children}</div>;
 }
@@ -318,6 +371,8 @@ export default function EduSmart() {
   const [authErr,   setAuthErr]   = useState("");
   const [section,   setSection]   = useState("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [quickQuery, setQuickQuery] = useState("");
+  const [jumpSearch, setJumpSearch] = useState("");
   const [notif,     setNotif]     = useState(null);
   const [lastActivity, setLastActivity] = useState(Date.now());
   const [failedLogins, setFailedLogins] = useState({});
@@ -336,7 +391,11 @@ export default function EduSmart() {
   const [nurseryLogs,setNurseryLogs]= useState(INITIAL_NURSERY_LOGS);
   const [milestones, setMilestones] = useState(INITIAL_MILESTONES);
   const [examSchedule,setExamSchedule]=useState(INITIAL_EXAM_SCHEDULE);
-  const [timetables, setTimetables] = useState(TIMETABLES);
+  const [timetables, setTimetables] = useState(DEFAULT_TIMETABLES);
+  const [classes, setClasses] = useState([...DEFAULT_CLASSES]);
+  const [classLevels, setClassLevels] = useState({...DEFAULT_CLASS_LEVELS});
+  const [subjects, setSubjects] = useState([...DEFAULT_SUBJECTS]);
+  const [yearArchive, setYearArchive] = useState({}); // year -> snapshot, populated at each promotion run
   const [auditLog,   setAuditLog]   = useState(AUDIT_LOG_INITIAL);
 
   const notify = (msg, type="success") => { setNotif({msg,type}); setTimeout(()=>setNotif(null),3500); };
@@ -445,15 +504,43 @@ export default function EduSmart() {
   const overdueBooks= borrows.filter(b=>!b.returnDate&&b.dueDate<todayStr());
   const noStock     = books.filter(b=>b.available===0);
 
+  // ─── GLOBAL QUICK SEARCH ────────────────────────────────────
+  const canSearchStudents = access.includes("students");
+  const canSearchStaff = access.includes("staff");
+  const quickResults = (() => {
+    const q = quickQuery.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const results = [];
+    if (canSearchStudents) {
+      students.filter(s=>s.name.toLowerCase().includes(q)||s.id.toLowerCase().includes(q)).slice(0,5)
+        .forEach(s=>results.push({ kind:"student", id:s.id, label:s.name, sub:`${s.class} · ${s.status}` }));
+    }
+    if (canSearchStaff) {
+      users.filter(u=>u.name.toLowerCase().includes(q)||u.code.toLowerCase().includes(q)).slice(0,5)
+        .forEach(u=>results.push({ kind:"staff", id:u.id, label:u.name, sub:`${u.role}${u.classAssigned?" · "+u.classAssigned:""}` }));
+    }
+    return results.slice(0,8);
+  })();
+
+  const jumpTo = (result) => {
+    setJumpSearch(result.label);
+    setSection(result.kind === "student" ? "students" : "staff");
+    setQuickQuery(""); setMobileNavOpen(false);
+  };
+
+  const navigate = (key) => { setSection(key); setJumpSearch(""); setMobileNavOpen(false); };
+
   // ─── NAV ─────────────────────────────────────────────────
   const navItems = [
     { key:"dashboard",     label:"Dashboard",     icon:"📊" },
     { key:"students",      label:"Students",       icon:"🎒" },
-    { key:"nursery",       label:"Nursery/KG",     icon:"🍼" },
+    { key:"nursery",       label:"Nursery",        icon:"🍼" },
+    { key:"kindergarten",  label:"Kindergarten",   icon:"🧸" },
     { key:"staff",         label:"Staff",          icon:"👥" },
     { key:"grades",        label:"Grades",         icon:"📝" },
     { key:"exams",         label:"Exams",          icon:"📖" },
     { key:"promotion",     label:"Promotion",      icon:"🎓" },
+    { key:"history",       label:"History",        icon:"📜" },
     { key:"attendance",    label:"Attendance",     icon:"✅" },
     { key:"finance",       label:"Finance",        icon:"💰" },
     { key:"payroll",       label:"Payroll",        icon:"💼" },
@@ -473,7 +560,7 @@ export default function EduSmart() {
     attendance,setAttendance,fees,setFees,expenses,setExpenses,payroll,setPayroll,books,setBooks,borrows,setBorrows,
     nurseryLogs,setNurseryLogs,milestones,setMilestones,examSchedule,setExamSchedule,timetables,setTimetables,
     auditLog,setAuditLog,curUser,notify,addAudit,absentAlerts,feeAlerts,overdueBooks,noStock,unlockUser,failedLogins,
-    setSchool,licInfo };
+    setSchool,licInfo,classes,setClasses,classLevels,setClassLevels,subjects,setSubjects,yearArchive,setYearArchive };
 
   return (
     <div style={{ display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',sans-serif",background:"#f1f5f9" }}>
@@ -501,7 +588,7 @@ export default function EduSmart() {
         </div>
         <div style={{ padding:"8px 0",flex:1 }}>
           {navItems.map(n=>(
-            <button key={n.key} onClick={()=>{setSection(n.key);setMobileNavOpen(false);}}
+            <button key={n.key} onClick={()=>navigate(n.key)}
               style={{ display:"block",width:"100%",textAlign:"left",padding:"9px 16px",
                 background:section===n.key?"#1e40af":"transparent",
                 color:section===n.key?"#fff":"#94a3b8",border:"none",cursor:"pointer",fontSize:13,
@@ -527,14 +614,42 @@ export default function EduSmart() {
         </div>
         {notif&&<div style={{ position:"fixed",top:16,right:16,zIndex:9999,padding:"12px 20px",borderRadius:10,
           background:notif.type==="success"?"#16a34a":"#dc2626",color:"#fff",fontSize:13,boxShadow:"0 4px 12px rgba(0,0,0,0.3)" }}>{notif.msg}</div>}
+
+        {/* GLOBAL QUICK SEARCH — jump straight to a student or staff member by name/ID */}
+        {(canSearchStudents||canSearchStaff) && (
+          <div style={{ padding:"14px 24px 0", position:"relative", maxWidth:420 }}>
+            <input value={quickQuery} onChange={e=>setQuickQuery(e.target.value)}
+              placeholder="🔍 Quick find a student or staff member..."
+              style={{ ...inp, background:"#fff" }}/>
+            {quickResults.length>0 && (
+              <div style={{ position:"absolute", top:"calc(100% - 4px)", left:24, right:24, background:"#fff", borderRadius:10,
+                boxShadow:"0 8px 24px rgba(0,0,0,0.15)", zIndex:200, overflow:"hidden", border:"1px solid #e5e7eb" }}>
+                {quickResults.map(r=>(
+                  <div key={r.kind+r.id} onClick={()=>jumpTo(r)}
+                    style={{ padding:"10px 14px", cursor:"pointer", borderBottom:"1px solid #f1f5f9", display:"flex", justifyContent:"space-between", alignItems:"center" }}
+                    onMouseDown={e=>e.preventDefault()}>
+                    <div>
+                      <div style={{ fontSize:13, fontWeight:600, color:"#0f172a" }}>{r.label}</div>
+                      <div style={{ fontSize:11, color:"#64748b" }}>{r.sub}</div>
+                    </div>
+                    <Badge text={r.kind==="student"?"Student":"Staff"} color={r.kind==="student"?"#1d4ed8":"#7c3aed"} bg={r.kind==="student"?"#dbeafe":"#ede9fe"}/>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="edusmart-main-pad" style={{ padding:24 }}>
           {section==="dashboard"    && <Dashboard    {...sharedProps}/>}
-          {section==="students"     && <Students     {...sharedProps}/>}
-          {section==="nursery"      && <Nursery      {...sharedProps}/>}
-          {section==="staff"        && <Staff        {...sharedProps}/>}
+          {section==="students"     && <Students     {...sharedProps} initialSearch={jumpSearch}/>}
+          {section==="nursery"      && <Nursery      {...sharedProps} levelFilter={["Nursery"]} pageTitle="Nursery" pageIcon="🍼"/>}
+          {section==="kindergarten" && <Nursery      {...sharedProps} levelFilter={["Kindergarten"]} pageTitle="Kindergarten" pageIcon="🧸"/>}
+          {section==="staff"        && <Staff        {...sharedProps} initialSearch={jumpSearch}/>}
           {section==="grades"       && <Grades       {...sharedProps}/>}
           {section==="exams"        && <Exams        {...sharedProps}/>}
           {section==="promotion"    && <Promotion    {...sharedProps}/>}
+          {section==="history"      && <YearHistory  {...sharedProps}/>}
           {section==="attendance"   && <Attendance   {...sharedProps}/>}
           {section==="finance"      && <Finance      {...sharedProps}/>}
           {section==="payroll"      && <Payroll      {...sharedProps}/>}
@@ -553,7 +668,11 @@ export default function EduSmart() {
 }
 
 // ─── DASHBOARD ───────────────────────────────────────────────
-function Dashboard({ school,students,fees,expenses,attendance,grades,books,borrows,users,curUser,absentAlerts,feeAlerts,overdueBooks,noStock,payroll }) {
+function Dashboard({ school,students,fees,expenses,attendance,grades,books,borrows,users,curUser,absentAlerts,feeAlerts,overdueBooks,noStock,payroll,examSchedule,mockExams }) {
+  if (curUser?.role === "Teacher") {
+    return <TeacherDashboard school={school} students={students} grades={grades} attendance={attendance}
+      examSchedule={examSchedule} mockExams={mockExams} curUser={curUser}/>;
+  }
   const active = students.filter(s=>s.status==="active");
   const totalPaid = fees.reduce((a,f)=>a+f.paid,0);
   const totalExp  = expenses.reduce((a,e)=>a+e.amount,0);
@@ -635,11 +754,116 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
   );
 }
 
-// ─── STUDENTS ────────────────────────────────────────────────
-function Students({ students,setStudents,notify,addAudit,curUser }) {
-  const [search,setSearch]=useState(""); const [fc,setFc]=useState(""); const [fs,setFs]=useState("all");
+// ─── TEACHER DASHBOARD ─────────────────────────────────────────
+// A focused view for Teacher-role users: their own class only, not the whole school.
+function TeacherDashboard({ school,students,grades,attendance,examSchedule,mockExams,curUser }) {
+  const myClass = curUser?.classAssigned;
+  const roster = students.filter(s=>s.status==="active" && s.class===myClass);
+  const todayAtt = attendance.filter(a=>a.class===myClass && a.date===todayStr());
+  const present = todayAtt.filter(a=>a.status==="Present").length;
+  const absent = todayAtt.filter(a=>a.status==="Absent").length;
+  const marked = todayAtt.length;
+
+  const classGrades = grades.filter(g=>g.class===myClass);
+  const currentTermGrades = classGrades.filter(g=>g.term===school.currentTerm && g.year===school.currentYear);
+  const classAvg = currentTermGrades.length ? Math.round(currentTermGrades.reduce((a,g)=>a+g.score,0)/currentTermGrades.length) : null;
+
+  // per-student average for this term, to find top/at-risk performers
+  const studentAverages = roster.map(s=>{
+    const sg = currentTermGrades.filter(g=>g.studentId===s.id);
+    const avg = sg.length ? Math.round(sg.reduce((a,g)=>a+g.score,0)/sg.length) : null;
+    return { ...s, avg, gradeCount:sg.length };
+  });
+  const ranked = studentAverages.filter(s=>s.avg!==null).sort((a,b)=>b.avg-a.avg);
+  const topPerformers = ranked.slice(0,5);
+  const needsAttention = ranked.slice(-5).reverse().filter(s=>s.avg<60);
+  const noGradesYet = studentAverages.filter(s=>s.avg===null);
+
+  // attendance rate per student (all-time) — flag anyone under 75%
+  const lowAttendance = roster.map(s=>{
+    const all = attendance.filter(a=>a.studentId===s.id);
+    const rate = all.length ? Math.round(all.filter(a=>a.status==="Present").length/all.length*100) : 100;
+    return { ...s, rate, total:all.length };
+  }).filter(s=>s.total>0 && s.rate<75).sort((a,b)=>a.rate-b.rate);
+
+  const upcomingExams = (examSchedule||[]).filter(e=>e.class===myClass && e.date>=todayStr()).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5);
+
+  if (!myClass) {
+    return (
+      <div>
+        <h2 style={{ fontSize:22,fontWeight:700,color:"#0f172a",margin:0 }}>Good day, {curUser?.name.split(" ")[0]} 👋</h2>
+        <p style={{ color:"#64748b",marginTop:10 }}>You don't have a class assigned yet. Contact an Admin to assign you a class.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom:20 }}>
+        <h2 style={{ fontSize:22,fontWeight:700,color:"#0f172a",margin:0 }}>Good day, {curUser?.name.split(" ")[0]} 👋</h2>
+        <p style={{ color:"#64748b",margin:"4px 0 0",fontSize:13 }}>{school.name} · {school.currentTerm} {school.currentYear} · Class Teacher: <strong>{myClass}</strong></p>
+      </div>
+
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:12,marginBottom:24 }}>
+        <StatCard icon="🎒" label="Class Size" value={roster.length} color="#3b82f6"/>
+        <StatCard icon="✅" label="Present Today" value={marked?`${present}/${roster.length}`:"Not marked"} color="#0ea5e9"/>
+        <StatCard icon="❌" label="Absent Today" value={marked?absent:"—"} color="#dc2626"/>
+        <StatCard icon="📊" label="Class Average" value={classAvg!==null?classAvg+"%":"No grades yet"} color={classAvg===null?"#9ca3af":classAvg>=70?"#16a34a":classAvg>=50?"#d97706":"#dc2626"}/>
+        <StatCard icon="⚠️" label="Low Attendance" value={lowAttendance.length} color="#ef4444" sub="students under 75%"/>
+        <StatCard icon="📖" label="Upcoming Exams" value={upcomingExams.length} color="#7c3aed"/>
+      </div>
+
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16 }}>
+        <Card style={{ padding:18 }}>
+          <h3 style={{ margin:"0 0 12px",fontSize:15,color:"#0f172a" }}>🏆 Top Performers ({school.currentTerm})</h3>
+          {topPerformers.length>0 ? topPerformers.map((s,i)=>(
+            <div key={s.id} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9",fontSize:13 }}>
+              <span>{i===0?"🥇":i===1?"🥈":i===2?"🥉":`${i+1}.`} {s.name}</span>
+              <span style={{ fontWeight:700,color:"#16a34a" }}>{s.avg}%</span>
+            </div>
+          )) : <p style={{ fontSize:13,color:"#9ca3af" }}>No grades entered for {school.currentTerm} yet.</p>}
+        </Card>
+        <Card style={{ padding:18 }}>
+          <h3 style={{ margin:"0 0 12px",fontSize:15,color:"#0f172a" }}>⚠️ Needs Attention</h3>
+          {needsAttention.length>0 ? needsAttention.map(s=>(
+            <div key={s.id} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9",fontSize:13 }}>
+              <span>{s.name}</span>
+              <span style={{ fontWeight:700,color:"#dc2626" }}>{s.avg}%</span>
+            </div>
+          )) : <p style={{ fontSize:13,color:"#16a34a" }}>✅ No students scoring below 60% this term.</p>}
+          {noGradesYet.length>0&&<p style={{ fontSize:11,color:"#94a3b8",marginTop:10 }}>{noGradesYet.length} student(s) have no grades entered yet this term.</p>}
+        </Card>
+      </div>
+
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
+        <Card style={{ padding:18 }}>
+          <h3 style={{ margin:"0 0 12px",fontSize:15,color:"#0f172a" }}>📉 Attendance Concerns</h3>
+          {lowAttendance.length>0 ? lowAttendance.slice(0,6).map(s=>(
+            <div key={s.id} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9",fontSize:13 }}>
+              <span>{s.name}</span>
+              <span style={{ fontWeight:700,color:"#dc2626" }}>{s.rate}%</span>
+            </div>
+          )) : <p style={{ fontSize:13,color:"#16a34a" }}>✅ Everyone's attending well.</p>}
+        </Card>
+        <Card style={{ padding:18 }}>
+          <h3 style={{ margin:"0 0 12px",fontSize:15,color:"#0f172a" }}>📖 Upcoming Exams</h3>
+          {upcomingExams.length>0 ? upcomingExams.map(e=>(
+            <div key={e.id} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9",fontSize:13 }}>
+              <span>{e.subject}</span>
+              <span style={{ color:"#64748b" }}>{e.date} · {e.startTime}</span>
+            </div>
+          )) : <p style={{ fontSize:13,color:"#9ca3af" }}>No exams scheduled for {myClass} yet.</p>}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+
+function Students({ students,setStudents,notify,addAudit,curUser,classes,classLevels,initialSearch }) {
+  const [search,setSearch]=useState(initialSearch||""); const [fc,setFc]=useState(""); const [fs,setFs]=useState("all");
   const [showForm,setShowForm]=useState(false); const [editId,setEditId]=useState(null);
-  const blank = { name:"",class:"Class 1A",dob:"",gender:"Male",guardian:"",phone:"",fees:500,paid:0,status:"active",section:"primary" };
+  const blank = { name:"",class:"Class 1A",dob:"",gender:"Male",guardian:"",phone:"",fees:500,paid:0,status:"active",section:"primary",photo:"" };
   const [form,setForm]=useState(blank);
 
   const filtered = students.filter(s=>{
@@ -667,7 +891,7 @@ function Students({ students,setStudents,notify,addAudit,curUser }) {
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name/ID..." style={{ ...inp,width:200 }}/>
         <select value={fc} onChange={e=>setFc(e.target.value)} style={{ ...inp,width:160 }}>
           <option value="">All Classes</option>
-          {CLASSES.map(c=><option key={c}>{c}</option>)}
+          {classes.map(c=><option key={c}>{c}</option>)}
         </select>
         <select value={fs} onChange={e=>setFs(e.target.value)} style={{ ...inp,width:140 }}>
           <option value="all">All Statuses</option>
@@ -678,8 +902,9 @@ function Students({ students,setStudents,notify,addAudit,curUser }) {
       </div>
       {showForm&&(
         <Modal title={editId?"Edit Student":"Add Student"} onClose={()=>{setShowForm(false);setEditId(null);}}>
+          <Row label="Photo"><PhotoUpload value={form.photo} onChange={p=>setForm(prev=>({...prev,photo:p}))}/></Row>
           <Row label="Full Name"><input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} style={inp}/></Row>
-          <Row label="Class"><select value={form.class} onChange={e=>setForm(p=>({...p,class:e.target.value}))} style={inp}>{CLASSES.map(c=><option key={c}>{c}</option>)}</select></Row>
+          <Row label="Class"><select value={form.class} onChange={e=>setForm(p=>({...p,class:e.target.value}))} style={inp}>{classes.map(c=><option key={c}>{c}</option>)}</select></Row>
           <Row label="Date of Birth"><input type="date" value={form.dob} onChange={e=>setForm(p=>({...p,dob:e.target.value}))} style={inp}/></Row>
           <Row label="Gender"><select value={form.gender} onChange={e=>setForm(p=>({...p,gender:e.target.value}))} style={inp}><option>Male</option><option>Female</option></select></Row>
           <Row label="Guardian Name"><input value={form.guardian} onChange={e=>setForm(p=>({...p,guardian:e.target.value}))} style={inp}/></Row>
@@ -708,7 +933,7 @@ function Students({ students,setStudents,notify,addAudit,curUser }) {
               <Badge text={s.status} color={s.status==="active"?"#166534":s.status==="graduated"?"#1d4ed8":"#991b1b"} bg={s.status==="active"?"#dcfce7":s.status==="graduated"?"#dbeafe":"#fee2e2"}/>
             </td>
             <td style={{ padding:"8px 12px",display:"flex",gap:4 }}>
-              <button onClick={()=>{setEditId(s.id);setForm({name:s.name,class:s.class,dob:s.dob||"",gender:s.gender,guardian:s.guardian,phone:s.phone,fees:s.fees,paid:s.paid,status:s.status});setShowForm(true);}} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8" }}>Edit</button>
+              <button onClick={()=>{setEditId(s.id);setForm({name:s.name,class:s.class,dob:s.dob||"",gender:s.gender,guardian:s.guardian,phone:s.phone,fees:s.fees,paid:s.paid,status:s.status,photo:s.photo||""});setShowForm(true);}} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8" }}>Edit</button>
               {s.status==="active"&&<button onClick={()=>{if(confirm(`Mark ${s.name} as dropout?`)){setStudents(p=>p.map(x=>x.id===s.id?{...x,status:"dropout"}:x));addAudit(`Dropout: ${s.name}`,"Students");notify("Moved to archive");}}} style={{ ...btnSm,background:"#fee2e2",color:"#991b1b" }}>Dropout</button>}
             </td>
           </tr>
@@ -719,7 +944,7 @@ function Students({ students,setStudents,notify,addAudit,curUser }) {
 }
 
 // ─── NURSERY / KG ────────────────────────────────────────────
-function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,curUser,notify,addAudit }) {
+function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,curUser,notify,addAudit,classLevels,levelFilter,pageTitle,pageIcon }) {
   const [tab,setTab]=useState("daily");
   const [selStu,setSelStu]=useState("");
   const [selDate,setSelDate]=useState(todayStr());
@@ -730,7 +955,11 @@ function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,
   const [logForm,setLogForm]=useState(blank);
   const [msForm,setMsForm]=useState({ category:"Motor Skills",milestone:"",rating:"Emerging" });
 
-  const kgStudents = students.filter(s=>s.status==="active"&&KG_CLASSES.includes(s.class));
+  // levelFilter: array of level names this page covers, e.g. ["Nursery"] or ["Kindergarten"].
+  // Falls back to the old combined Nursery+KG group if not provided (backward compatible).
+  const kgStudents = students.filter(s=>s.status==="active"&&(
+    levelFilter ? levelFilter.includes(classLevels?.[s.class]) : KG_CLASSES.includes(s.class)
+  ));
   const selStudent  = students.find(s=>s.id===selStu);
   const stuLogs     = nurseryLogs.filter(l=>l.studentId===selStu).sort((a,b)=>b.date.localeCompare(a.date));
   const stuMilestones= milestones.filter(m=>m.studentId===selStu);
@@ -754,7 +983,7 @@ function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,
 
   return (
     <div>
-      <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>🍼 Nursery & KG</h2>
+      <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>{pageIcon||"🍼"} {pageTitle||"Nursery & KG"}</h2>
       <div style={{ display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center" }}>
         <select value={selStu} onChange={e=>setSelStu(e.target.value)} style={{ ...inp,width:220 }}>
           <option value="">Select child</option>
@@ -763,7 +992,7 @@ function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,
         <Tabs tabs={[{key:"daily",label:"📋 Daily Log"},{key:"milestones",label:"🌟 Milestones"},{key:"report",label:"📄 KG Report"}]} active={tab} onChange={setTab}/>
       </div>
 
-      {!selStu&&<div style={{ background:"#f0f9ff",borderRadius:12,padding:32,textAlign:"center",color:"#0369a1" }}><div style={{ fontSize:40,marginBottom:8 }}>🍼</div><p>Select a child above to view or enter records</p><p style={{ fontSize:13,color:"#64748b" }}>{kgStudents.length} Nursery/KG children enrolled</p></div>}
+      {!selStu&&<div style={{ background:"#f0f9ff",borderRadius:12,padding:32,textAlign:"center",color:"#0369a1" }}><div style={{ fontSize:40,marginBottom:8 }}>{pageIcon||"🍼"}</div><p>Select a child above to view or enter records</p><p style={{ fontSize:13,color:"#64748b" }}>{kgStudents.length} {pageTitle||"Nursery/KG"} children enrolled</p></div>}
 
       {selStu&&tab==="daily"&&(
         <div>
@@ -903,10 +1132,10 @@ function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,
 }
 
 // ─── STAFF ───────────────────────────────────────────────────
-function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser }) {
+function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser,classes,initialSearch }) {
   const [filterRole,setFilterRole]=useState("");
   const [showForm,setShowForm]=useState(false); const [editId,setEditId]=useState(null);
-  const blank = { name:"",role:"Teacher",pin:"",code:"",email:"",classAssigned:"",active:true,salary:1500,transport:150,housing:0,ssnit:true };
+  const blank = { name:"",role:"Teacher",pin:"",code:"",email:"",classAssigned:"",active:true,salary:1500,transport:150,housing:0,ssnit:true,photo:"" };
   const [form,setForm]=useState(blank);
 
   const roleColors = { Admin:"#7c3aed",Headmaster:"#1d4ed8",HOD:"#0369a1",Teacher:"#059669","Account Office":"#d97706",Librarian:"#6d28d9","Non-Teaching Staff":"#6b7280" };
@@ -918,7 +1147,8 @@ function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser }) {
     setShowForm(false); setEditId(null); setForm(blank);
   };
 
-  const filtered = users.filter(u=>!filterRole||u.role===filterRole);
+  const [staffSearch,setStaffSearch]=useState(initialSearch||"");
+  const filtered = users.filter(u=>(!filterRole||u.role===filterRole)&&(!staffSearch||u.name.toLowerCase().includes(staffSearch.toLowerCase())||u.code.toLowerCase().includes(staffSearch.toLowerCase())));
 
   return (
     <div>
@@ -926,19 +1156,23 @@ function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser }) {
         <h2 style={{ margin:0,fontSize:20,fontWeight:700,color:"#0f172a" }}>👥 Staff Management</h2>
         <button onClick={()=>{setShowForm(true);setEditId(null);setForm(blank);}} style={btnP}>+ Add Staff</button>
       </div>
-      <select value={filterRole} onChange={e=>setFilterRole(e.target.value)} style={{ ...inp,width:200,marginBottom:14 }}>
-        <option value="">All Roles</option>
-        {ROLES.map(r=><option key={r}>{r}</option>)}
-      </select>
+      <div style={{ display:"flex",gap:8,marginBottom:14,flexWrap:"wrap" }}>
+        <input value={staffSearch} onChange={e=>setStaffSearch(e.target.value)} placeholder="Search name/code..." style={{ ...inp,width:200 }}/>
+        <select value={filterRole} onChange={e=>setFilterRole(e.target.value)} style={{ ...inp,width:200 }}>
+          <option value="">All Roles</option>
+          {ROLES.map(r=><option key={r}>{r}</option>)}
+        </select>
+      </div>
       {showForm&&(
         <Modal title={editId?"Edit Staff":"Add Staff"} onClose={()=>{setShowForm(false);setEditId(null);}}>
+          <Row label="Photo"><PhotoUpload value={form.photo} onChange={p=>setForm(prev=>({...prev,photo:p}))}/></Row>
           <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
             <Row label="Full Name"><input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} style={inp}/></Row>
             <Row label="Staff Code"><input value={form.code} onChange={e=>setForm(p=>({...p,code:e.target.value.toUpperCase()}))} style={inp}/></Row>
             <Row label="Role"><select value={form.role} onChange={e=>setForm(p=>({...p,role:e.target.value}))} style={inp}>{ROLES.map(r=><option key={r}>{r}</option>)}</select></Row>
             <Row label="PIN (4 digits)"><input type="password" value={form.pin} onChange={e=>setForm(p=>({...p,pin:e.target.value}))} maxLength={4} style={inp}/></Row>
             <Row label="Email"><input value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))} style={inp}/></Row>
-            {form.role==="Teacher"&&<Row label="Class"><select value={form.classAssigned||""} onChange={e=>setForm(p=>({...p,classAssigned:e.target.value}))} style={inp}><option value="">None</option>{CLASSES.map(c=><option key={c}>{c}</option>)}</select></Row>}
+            {form.role==="Teacher"&&<Row label="Class"><select value={form.classAssigned||""} onChange={e=>setForm(p=>({...p,classAssigned:e.target.value}))} style={inp}><option value="">None</option>{classes.map(c=><option key={c}>{c}</option>)}</select></Row>}
             <Row label="Base Salary (GH₵)"><input type="number" value={form.salary||0} onChange={e=>setForm(p=>({...p,salary:+e.target.value}))} style={inp}/></Row>
             <Row label="Transport (GH₵)"><input type="number" value={form.transport||0} onChange={e=>setForm(p=>({...p,transport:+e.target.value}))} style={inp}/></Row>
             <Row label="Housing (GH₵)"><input type="number" value={form.housing||0} onChange={e=>setForm(p=>({...p,housing:+e.target.value}))} style={inp}/></Row>
@@ -965,7 +1199,7 @@ function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser }) {
               <td style={{ padding:"8px 12px" }}><Badge text={u.active?"Active":"Inactive"} color={u.active?"#166534":"#991b1b"} bg={u.active?"#dcfce7":"#fee2e2"}/></td>
               <td style={{ padding:"8px 12px" }}>{locked?<Badge text="LOCKED" color="#991b1b" bg="#fee2e2"/>:<Badge text="OK" color="#166534" bg="#dcfce7"/>}</td>
               <td style={{ padding:"8px 12px",display:"flex",gap:4 }}>
-                <button onClick={()=>{setEditId(u.id);setForm({name:u.name,role:u.role,pin:u.pin,code:u.code,email:u.email,classAssigned:u.classAssigned||"",active:u.active,salary:u.salary||0,transport:u.transport||0,housing:u.housing||0,ssnit:u.ssnit!==false});setShowForm(true);}} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8" }}>Edit</button>
+                <button onClick={()=>{setEditId(u.id);setForm({name:u.name,role:u.role,pin:u.pin,code:u.code,email:u.email,classAssigned:u.classAssigned||"",active:u.active,salary:u.salary||0,transport:u.transport||0,housing:u.housing||0,ssnit:u.ssnit!==false,photo:u.photo||""});setShowForm(true);}} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8" }}>Edit</button>
                 {locked&&<button onClick={()=>unlockUser(u.id)} style={{ ...btnSm,background:"#dcfce7",color:"#166534" }}>Unlock</button>}
               </td>
             </tr>
@@ -976,11 +1210,11 @@ function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser }) {
 }
 
 // ─── GRADES ──────────────────────────────────────────────────
-function Grades({ grades,setGrades,students,curUser,notify,addAudit }) {
+function Grades({ grades,setGrades,students,curUser,notify,addAudit,classes,subjects }) {
   const isTeacher=curUser?.role==="Teacher"; const myClass=isTeacher?curUser?.classAssigned:null;
   const [fc,setFc]=useState(myClass||""); const [fsub,setFsub]=useState(""); const [fterm,setFterm]=useState("");
   const [showForm,setShowForm]=useState(false); const [editId,setEditId]=useState(null);
-  const blank={ studentId:"",subject:SUBJECTS[0],ca:"",exam:"",term:"Term 2",year:"2024/2025" };
+  const blank={ studentId:"",subject:subjects[0],ca:"",exam:"",term:"Term 2",year:"2024/2025" };
   const [form,setForm]=useState(blank);
 
   const avStudents=students.filter(s=>s.status==="active"&&(!fc||s.class===fc)&&(!isTeacher||s.class===myClass));
@@ -1011,14 +1245,14 @@ function Grades({ grades,setGrades,students,curUser,notify,addAudit }) {
       </div>
       <div style={{ display:"flex",gap:8,marginBottom:14,flexWrap:"wrap" }}>
         {isTeacher?<div style={{ padding:"8px 14px",background:"#dbeafe",borderRadius:8,fontSize:13,color:"#1d4ed8",fontWeight:600 }}>📌 {myClass}</div>:
-          <select value={fc} onChange={e=>setFc(e.target.value)} style={{ ...inp,width:160 }}><option value="">All Classes</option>{CLASSES.map(c=><option key={c}>{c}</option>)}</select>}
-        <select value={fsub} onChange={e=>setFsub(e.target.value)} style={{ ...inp,width:180 }}><option value="">All Subjects</option>{SUBJECTS.map(s=><option key={s}>{s}</option>)}</select>
+          <select value={fc} onChange={e=>setFc(e.target.value)} style={{ ...inp,width:160 }}><option value="">All Classes</option>{classes.map(c=><option key={c}>{c}</option>)}</select>}
+        <select value={fsub} onChange={e=>setFsub(e.target.value)} style={{ ...inp,width:180 }}><option value="">All Subjects</option>{subjects.map(s=><option key={s}>{s}</option>)}</select>
         <select value={fterm} onChange={e=>setFterm(e.target.value)} style={{ ...inp,width:120 }}><option value="">All Terms</option><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
       </div>
       {showForm&&(
         <Modal title={editId?"Edit Grade":"Enter Grade"} onClose={()=>{setShowForm(false);setEditId(null);}}>
           <Row label="Student"><select value={form.studentId} onChange={e=>setForm(p=>({...p,studentId:e.target.value}))} style={inp}><option value="">Select</option>{avStudents.map(s=><option key={s.id} value={s.id}>{s.name} — {s.class}</option>)}</select></Row>
-          <Row label="Subject"><select value={form.subject} onChange={e=>setForm(p=>({...p,subject:e.target.value}))} style={inp}>{SUBJECTS.map(s=><option key={s}>{s}</option>)}</select></Row>
+          <Row label="Subject"><select value={form.subject} onChange={e=>setForm(p=>({...p,subject:e.target.value}))} style={inp}>{subjects.map(s=><option key={s}>{s}</option>)}</select></Row>
           <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
             <Row label="CA Score (out of 30)"><input type="number" min={0} max={30} value={form.ca} onChange={e=>setForm(p=>({...p,ca:e.target.value}))} style={inp}/></Row>
             <Row label="Exam Score (out of 70)"><input type="number" min={0} max={70} value={form.exam} onChange={e=>setForm(p=>({...p,exam:e.target.value}))} style={inp}/></Row>
@@ -1062,11 +1296,11 @@ function Grades({ grades,setGrades,students,curUser,notify,addAudit }) {
 }
 
 // ─── EXAMS ───────────────────────────────────────────────────
-function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,curUser,notify,addAudit }) {
+function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,curUser,notify,addAudit,classes,subjects }) {
   const [tab,setTab]=useState("schedule");
   const [showSched,setShowSched]=useState(false); const [showMock,setShowMock]=useState(false);
-  const schedBlank={ class:"JHS 3",subject:EXAM_SUBJECTS[0],date:"",startTime:"08:00",endTime:"10:00",venue:"Main Hall" };
-  const mockBlank={ studentId:"",subject:EXAM_SUBJECTS[0],score:"",examType:"Mock 1",term:"Term 2",year:"2024/2025" };
+  const schedBlank={ class:"JHS 3",subject:getExamSubjects(subjects)[0],date:"",startTime:"08:00",endTime:"10:00",venue:"Main Hall" };
+  const mockBlank={ studentId:"",subject:getExamSubjects(subjects)[0],score:"",examType:"Mock 1",term:"Term 2",year:"2024/2025" };
   const [sf,setSf]=useState(schedBlank); const [mf,setMf]=useState(mockBlank);
 
   const jhs3 = students.filter(s=>s.class==="JHS 3"&&s.status==="active");
@@ -1104,8 +1338,8 @@ function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,cu
           </div>
           {showSched&&(
             <Modal title="Schedule Exam" onClose={()=>setShowSched(false)}>
-              <Row label="Class"><select value={sf.class} onChange={e=>setSf(p=>({...p,class:e.target.value}))} style={inp}>{CLASSES.map(c=><option key={c}>{c}</option>)}</select></Row>
-              <Row label="Subject"><select value={sf.subject} onChange={e=>setSf(p=>({...p,subject:e.target.value}))} style={inp}>{EXAM_SUBJECTS.map(s=><option key={s}>{s}</option>)}</select></Row>
+              <Row label="Class"><select value={sf.class} onChange={e=>setSf(p=>({...p,class:e.target.value}))} style={inp}>{classes.map(c=><option key={c}>{c}</option>)}</select></Row>
+              <Row label="Subject"><select value={sf.subject} onChange={e=>setSf(p=>({...p,subject:e.target.value}))} style={inp}>{getExamSubjects(subjects).map(s=><option key={s}>{s}</option>)}</select></Row>
               <Row label="Date"><input type="date" value={sf.date} onChange={e=>setSf(p=>({...p,date:e.target.value}))} style={inp}/></Row>
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
                 <Row label="Start Time"><input type="time" value={sf.startTime} onChange={e=>setSf(p=>({...p,startTime:e.target.value}))} style={inp}/></Row>
@@ -1140,7 +1374,7 @@ function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,cu
           {showMock&&(
             <Modal title="Enter Mock Result" onClose={()=>setShowMock(false)}>
               <Row label="Student"><select value={mf.studentId} onChange={e=>setMf(p=>({...p,studentId:e.target.value}))} style={inp}><option value="">Select</option>{students.filter(s=>s.status==="active").map(s=><option key={s.id} value={s.id}>{s.name} — {s.class}</option>)}</select></Row>
-              <Row label="Subject"><select value={mf.subject} onChange={e=>setMf(p=>({...p,subject:e.target.value}))} style={inp}>{EXAM_SUBJECTS.map(s=><option key={s}>{s}</option>)}</select></Row>
+              <Row label="Subject"><select value={mf.subject} onChange={e=>setMf(p=>({...p,subject:e.target.value}))} style={inp}>{getExamSubjects(subjects).map(s=><option key={s}>{s}</option>)}</select></Row>
               <Row label="Score (0–100)"><input type="number" min={0} max={100} value={mf.score} onChange={e=>setMf(p=>({...p,score:e.target.value}))} style={inp}/></Row>
               <Row label="Exam Type"><select value={mf.examType} onChange={e=>setMf(p=>({...p,examType:e.target.value}))} style={inp}><option>Mock 1</option><option>Mock 2</option><option>Mock 3</option><option>Pre-BECE</option></select></Row>
               <Row label="Term"><select value={mf.term} onChange={e=>setMf(p=>({...p,term:e.target.value}))} style={inp}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select></Row>
@@ -1198,7 +1432,7 @@ function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,cu
 }
 
 // ─── PROMOTION ───────────────────────────────────────────────
-function Promotion({ students,setStudents,grades,school,setSchool,curUser,notify,addAudit }) {
+function Promotion({ students,setStudents,grades,mockExams,attendance,fees,payroll,examSchedule,school,setSchool,curUser,notify,addAudit,yearArchive,setYearArchive }) {
   const [passMark,setPassMark]=useState(50);
   const [evalYear,setEvalYear]=useState(school.currentYear);
   const [preview,setPreview]=useState(null); // array of { student, avg, hasData, defaultResult, override }
@@ -1220,9 +1454,11 @@ function Promotion({ students,setStudents,grades,school,setSchool,curUser,notify
         const avg = hasData ? Math.round(sGrades.reduce((a,g)=>a+g.score,0)/sGrades.length) : null;
         const willPass = hasData ? avg>=passMark : false;
         const isJHS3 = cls==="JHS 3";
+        const hasPath = isJHS3 || !!nextClassFor(cls, idx);
         let defaultResult;
         if (!hasData) defaultResult = "Review"; // no grades on record — needs manual decision
         else if (isJHS3) defaultResult = willPass ? "Graduate" : "Repeat";
+        else if (willPass && !hasPath) defaultResult = "Review"; // custom class with no defined next class
         else defaultResult = willPass ? "Promote" : "Repeat";
         const nextClass = isJHS3 ? null : (willPass ? nextClassFor(cls, idx) : cls);
         rows.push({ student:s, currentClass:cls, avg, hasData, defaultResult, nextClass, override:defaultResult });
@@ -1245,6 +1481,40 @@ function Promotion({ students,setStudents,grades,school,setSchool,curUser,notify
 
   const runPromotion = () => {
     if (!preview) return;
+    const closingYear = school.currentYear;
+
+    // Snapshot everything for this closing year into the archive before anything changes,
+    // so History can show a permanent record of the year — including every term in it.
+    const yearGrades = grades.filter(g=>g.year===closingYear);
+    const yearMock = (mockExams||[]).filter(m=>m.year===closingYear);
+    const yearFees = fees.filter(f=>f.year===closingYear);
+    const yearPayroll = (payroll||[]).filter(p=>p.year===closingYear.split("/")[0] || p.year===closingYear);
+    const terms = ["Term 1","Term 2","Term 3"];
+    const termBreakdown = terms.map(term=>{
+      const tg = yearGrades.filter(g=>g.term===term);
+      const tf = yearFees.filter(f=>f.term===term);
+      return {
+        term,
+        gradeCount: tg.length,
+        avgScore: tg.length ? Math.round(tg.reduce((a,g)=>a+g.score,0)/tg.length) : null,
+        feesCollected: tf.reduce((a,f)=>a+f.paid,0),
+      };
+    }).filter(t=>t.gradeCount>0 || t.feesCollected>0);
+
+    setYearArchive(prev=>({
+      ...prev,
+      [closingYear]: {
+        closedDate: nowStr(),
+        closedBy: curUser?.code,
+        studentsSnapshot: students.map(s=>({ id:s.id,name:s.name,class:s.class,status:s.status })),
+        termBreakdown,
+        totalStudents: activeStudents.length,
+        totalFeesCollected: yearFees.reduce((a,f)=>a+f.paid,0),
+        totalPayroll: yearPayroll.reduce((a,p)=>a+(p.netPay||0),0),
+        promotionSummary: counts,
+      }
+    }));
+
     let byClass = {}; // recompute nextClass for Promote rows honoring KG2 split order at execution time
     const classCounters = {};
     setStudents(prevStudents=>{
@@ -1264,9 +1534,9 @@ function Promotion({ students,setStudents,grades,school,setSchool,curUser,notify
     });
     const newYear = nextAcademicYear(school.currentYear);
     setSchool(prev=>({ ...prev, currentYear:newYear, currentTerm:"Term 1" }));
-    addAudit(`Year-end promotion run: ${counts.Promote} promoted, ${counts.Graduate} graduated, ${counts.Repeat} repeated, ${counts.Review} flagged for review. New year: ${newYear}`,"Promotion");
+    addAudit(`Year-end promotion run: ${counts.Promote} promoted, ${counts.Graduate} graduated, ${counts.Repeat} repeated, ${counts.Review} flagged for review. New year: ${newYear}. Year ${closingYear} archived to History.`,"Promotion");
     setDone({ ...counts, newYear });
-    notify("Promotion completed ✅");
+    notify("Promotion completed ✅ — year archived to History");
     setShowConfirm(false);
   };
 
@@ -1366,10 +1636,102 @@ function Promotion({ students,setStudents,grades,school,setSchool,curUser,notify
 }
 
 
+// ─── YEAR HISTORY ────────────────────────────────────────────
+// Browse the archive that gets created automatically each time Promotion is run.
+function YearHistory({ yearArchive }) {
+  const years = Object.keys(yearArchive||{}).sort().reverse();
+  const [selYear,setSelYear] = useState(years[0]||"");
+  const archive = selYear ? yearArchive[selYear] : null;
+  const [classFilter,setClassFilter] = useState("");
+
+  const snapshotClasses = archive ? [...new Set(archive.studentsSnapshot.map(s=>s.class))].sort() : [];
+  const filteredSnapshot = archive ? archive.studentsSnapshot.filter(s=>!classFilter||s.class===classFilter) : [];
+
+  return (
+    <div>
+      <h2 style={{ margin:"0 0 8px",fontSize:20,fontWeight:700,color:"#0f172a" }}>📜 Year History</h2>
+      <p style={{ margin:"0 0 16px",fontSize:13,color:"#64748b" }}>
+        A permanent record of each academic year, created automatically whenever Year-End Promotion is run. Includes a term-by-term breakdown and a snapshot of every student's class and status at year-close.
+      </p>
+
+      {years.length===0 && (
+        <div style={{ background:"#f0f9ff",borderRadius:12,padding:32,textAlign:"center",color:"#0369a1" }}>
+          <div style={{ fontSize:40,marginBottom:8 }}>📜</div>
+          <p>No archived years yet.</p>
+          <p style={{ fontSize:13,color:"#64748b" }}>Run Year-End Promotion once a school year closes, and it'll appear here automatically.</p>
+        </div>
+      )}
+
+      {years.length>0 && (
+        <div style={{ display:"flex",gap:16 }}>
+          <div style={{ width:180,flexShrink:0 }}>
+            {years.map(y=>(
+              <button key={y} onClick={()=>{setSelYear(y);setClassFilter("");}}
+                style={{ display:"block",width:"100%",textAlign:"left",padding:"10px 14px",marginBottom:6,borderRadius:8,border:"none",cursor:"pointer",
+                  background:selYear===y?"#1e40af":"#f1f5f9",color:selYear===y?"#fff":"#374151",fontWeight:600,fontSize:13 }}>
+                {y}
+              </button>
+            ))}
+          </div>
+
+          {archive && (
+            <div style={{ flex:1 }}>
+              <Card style={{ padding:18,marginBottom:16 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+                  <h3 style={{ margin:0,fontSize:16,color:"#0f172a" }}>Academic Year {selYear}</h3>
+                  <span style={{ fontSize:11,color:"#94a3b8" }}>Closed {archive.closedDate} by {archive.closedBy}</span>
+                </div>
+                <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10 }}>
+                  <StatCard icon="🎒" label="Students at Close" value={archive.totalStudents} color="#3b82f6"/>
+                  <StatCard icon="💰" label="Fees Collected" value={formatGHS(archive.totalFeesCollected)} color="#16a34a"/>
+                  <StatCard icon="💼" label="Payroll Paid" value={formatGHS(archive.totalPayroll)} color="#7c3aed"/>
+                  <StatCard icon="🎓" label="Promoted/Graduated" value={`${archive.promotionSummary?.Promote||0}/${archive.promotionSummary?.Graduate||0}`} color="#d97706"/>
+                </div>
+              </Card>
+
+              <Card style={{ padding:18,marginBottom:16 }}>
+                <h3 style={{ margin:"0 0 12px",fontSize:15,color:"#0f172a" }}>Term Breakdown</h3>
+                {archive.termBreakdown.length>0 ? (
+                  <Table cols={["Term","Grade Records","Class Average","Fees Collected"]}
+                    rows={archive.termBreakdown.map(t=>(
+                      <tr key={t.term} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                        <TD bold>{t.term}</TD>
+                        <TD>{t.gradeCount}</TD>
+                        <TD bold color={t.avgScore===null?"#9ca3af":t.avgScore>=70?"#16a34a":t.avgScore>=50?"#d97706":"#dc2626"}>{t.avgScore!==null?t.avgScore+"%":"—"}</TD>
+                        <TD>{formatGHS(t.feesCollected)}</TD>
+                      </tr>
+                    ))}/>
+                ) : <p style={{ fontSize:13,color:"#9ca3af" }}>No term data recorded for this year.</p>}
+              </Card>
+
+              <Card style={{ padding:18 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+                  <h3 style={{ margin:0,fontSize:15,color:"#0f172a" }}>Student Roster at Year-Close</h3>
+                  <select value={classFilter} onChange={e=>setClassFilter(e.target.value)} style={{ ...inp,width:160 }}>
+                    <option value="">All Classes</option>
+                    {snapshotClasses.map(c=><option key={c}>{c}</option>)}
+                  </select>
+                </div>
+                <Table cols={["Student","Class at Close","Status"]}
+                  rows={filteredSnapshot.map(s=>(
+                    <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                      <TD bold>{s.name}</TD><TD>{s.class}</TD>
+                      <td style={{ padding:"8px 12px" }}><Badge text={s.status} color={s.status==="active"?"#166534":s.status==="graduated"?"#1d4ed8":"#991b1b"} bg={s.status==="active"?"#dcfce7":s.status==="graduated"?"#dbeafe":"#fee2e2"}/></td>
+                    </tr>
+                  ))} emptyMsg="No students in this filter."/>
+              </Card>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ATTENDANCE ──────────────────────────────────────────────
-function Attendance({ attendance,setAttendance,students,curUser,notify,addAudit }) {
+function Attendance({ attendance,setAttendance,students,curUser,notify,addAudit,classes }) {
   const isTeacher=curUser?.role==="Teacher"; const myClass=isTeacher?curUser?.classAssigned:null;
-  const [date,setDate]=useState(todayStr()); const [selClass,setSelClass]=useState(myClass||CLASSES[5]);
+  const [date,setDate]=useState(todayStr()); const [selClass,setSelClass]=useState(myClass||classes[5]);
   const [view,setView]=useState("mark");
 
   const classStu=students.filter(s=>s.status==="active"&&s.class===selClass);
@@ -1409,7 +1771,7 @@ function Attendance({ attendance,setAttendance,students,curUser,notify,addAudit 
           <div style={{ display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center" }}>
             <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={{ ...inp,width:170 }}/>
             {isTeacher?<div style={{ padding:"8px 14px",background:"#dbeafe",borderRadius:8,fontSize:13,color:"#1d4ed8",fontWeight:600 }}>📌 {selClass}</div>:
-              <select value={selClass} onChange={e=>setSelClass(e.target.value)} style={{ ...inp,width:160 }}>{CLASSES.map(c=><option key={c}>{c}</option>)}</select>}
+              <select value={selClass} onChange={e=>setSelClass(e.target.value)} style={{ ...inp,width:160 }}>{classes.map(c=><option key={c}>{c}</option>)}</select>}
             <button onClick={()=>markAll("Present")} style={{ ...btnSm,background:"#dcfce7",color:"#166534",padding:"8px 14px" }}>✅ All Present</button>
             <button onClick={()=>markAll("Absent")} style={{ ...btnSm,background:"#fee2e2",color:"#991b1b",padding:"8px 14px" }}>❌ All Absent</button>
             <button onClick={()=>{ addAudit(`Attendance saved: ${selClass} ${date}`,"Attendance"); notify("Attendance saved ✅"); }} style={{ ...btnP,padding:"8px 14px" }}>💾 Save</button>
@@ -1926,6 +2288,8 @@ function Timetable({ timetables,setTimetables,curUser }) {
   const [editMode,setEditMode]=useState(false);
   const [editCell,setEditCell]=useState(null); // {dayIdx,periodIdx}
   const [editVal,setEditVal]=useState("");
+  const [editTimeRow,setEditTimeRow]=useState(null); // periodIdx being time-edited
+  const [editTimeVal,setEditTimeVal]=useState("");
   const tt=timetables[selClass];
   const dayColors=["#eff6ff","#f0fdf4","#fefce8","#fdf2f8","#f0fdfa"];
 
@@ -1942,6 +2306,21 @@ function Timetable({ timetables,setTimetables,curUser }) {
       return newTT;
     });
     setEditCell(null); setEditVal("");
+  };
+
+  // A period's time slot is the same across all 5 days, so editing it updates every day's row at once.
+  const saveTimeRow=(periodIdx)=>{
+    setTimetables(prev=>{
+      const newTT={...prev};
+      const days=(newTT[selClass]||[]).map(day=>{
+        const periods=[...day.periods];
+        periods[periodIdx]={...periods[periodIdx],time:editTimeVal};
+        return {...day,periods};
+      });
+      newTT[selClass]=days;
+      return newTT;
+    });
+    setEditTimeRow(null); setEditTimeVal("");
   };
 
   return (
@@ -1964,7 +2343,15 @@ function Timetable({ timetables,setTimetables,curUser }) {
             <tbody>
               {tt[0].periods.map((p,pi)=>(
                 <tr key={pi} style={{ borderBottom:"1px solid #f1f5f9" }}>
-                  <td style={{ padding:"8px 12px",fontWeight:600,color:"#374151",background:"#f8fafc",whiteSpace:"nowrap" }}>{p.time}</td>
+                  <td style={{ padding:"8px 12px",fontWeight:600,color:"#374151",background:"#f8fafc",whiteSpace:"nowrap",cursor:editMode?"pointer":"default" }}
+                    onClick={()=>{ if(editMode){ setEditTimeRow(pi); setEditTimeVal(p.time); } }}>
+                    {editTimeRow===pi ? (
+                      <input value={editTimeVal} onChange={e=>setEditTimeVal(e.target.value)} placeholder="e.g. 7:30-8:30"
+                        style={{ width:100,padding:"3px 6px",borderRadius:4,border:"1px solid #93c5fd",fontSize:11 }}
+                        onClick={e=>e.stopPropagation()}
+                        onKeyDown={e=>{ if(e.key==="Enter") saveTimeRow(pi); if(e.key==="Escape"){ setEditTimeRow(null);setEditTimeVal(""); }}} autoFocus/>
+                    ) : p.time}
+                  </td>
                   {tt.map((d,di)=>{
                     const per=d.periods[pi];
                     const isBreak=per.subject==="Break"||per.subject==="Lunch";
@@ -1989,7 +2376,7 @@ function Timetable({ timetables,setTimetables,curUser }) {
           </table>
         </div>
       ):<div style={{ textAlign:"center",color:"#9ca3af",padding:40 }}>No timetable for {selClass}. Select a class with a timetable or add one.</div>}
-      {editMode&&<p style={{ fontSize:12,color:"#64748b",marginTop:8 }}>Click any cell to edit. Press Enter to save, Escape to cancel.</p>}
+      {editMode&&<p style={{ fontSize:12,color:"#64748b",marginTop:8 }}>Click any subject cell to edit it, or click a time in the left column to change that period's time for all 5 days. Press Enter to save, Escape to cancel.</p>}
     </div>
   );
 }
@@ -2161,7 +2548,7 @@ ${school.principalName||"The Principal"}`,
             </select></Row>
             <Row label="Filter by Class (for broadcast)"><select value={selClass} onChange={e=>setSelClass(e.target.value)} style={inp}>
               <option value="">All Classes</option>
-              {CLASSES.map(c=><option key={c}>{c}</option>)}
+              {classes.map(c=><option key={c}>{c}</option>)}
             </select></Row>
             <div style={{ display:"flex",gap:8,marginTop:8 }}>
               <button onClick={getPreview} style={{ ...btnP,flex:1 }}>👁️ Preview</button>
@@ -2211,9 +2598,9 @@ ${school.principalName||"The Principal"}`,
 }
 
 // ─── REPORTS ─────────────────────────────────────────────────
-function Reports({ students,grades,attendance,fees,expenses,school }) {
+function Reports({ students,grades,attendance,fees,expenses,school,classes,subjects }) {
   const [rt,setRt]=useState("student");
-  const [sc,setSc]=useState(CLASSES[5]); const [ss,setSs]=useState(""); const [st,setSt]=useState("Term 1");
+  const [sc,setSc]=useState(classes[5]); const [ss,setSs]=useState(""); const [st,setSt]=useState("Term 1");
 
   const classStu=students.filter(s=>s.status==="active"&&s.class===sc);
   const sg=(sid,term)=>grades.filter(g=>g.studentId===sid&&g.term===term);
@@ -2236,7 +2623,7 @@ function Reports({ students,grades,attendance,fees,expenses,school }) {
       {rt==="student"&&(
         <div>
           <div style={{ display:"flex",gap:8,marginBottom:14,flexWrap:"wrap" }}>
-            <select value={sc} onChange={e=>{setSc(e.target.value);setSs("");}} style={{ ...inp,width:160 }}>{CLASSES.map(c=><option key={c}>{c}</option>)}</select>
+            <select value={sc} onChange={e=>{setSc(e.target.value);setSs("");}} style={{ ...inp,width:160 }}>{classes.map(c=><option key={c}>{c}</option>)}</select>
             <select value={ss} onChange={e=>setSs(e.target.value)} style={{ ...inp,width:220 }}><option value="">Select student</option>{classStu.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select>
             <select value={st} onChange={e=>setSt(e.target.value)} style={{ ...inp,width:120 }}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
           </div>
@@ -2292,7 +2679,7 @@ function Reports({ students,grades,attendance,fees,expenses,school }) {
       {rt==="class"&&(
         <div>
           <div style={{ display:"flex",gap:8,marginBottom:14 }}>
-            <select value={sc} onChange={e=>setSc(e.target.value)} style={{ ...inp,width:160 }}>{CLASSES.map(c=><option key={c}>{c}</option>)}</select>
+            <select value={sc} onChange={e=>setSc(e.target.value)} style={{ ...inp,width:160 }}>{classes.map(c=><option key={c}>{c}</option>)}</select>
             <select value={st} onChange={e=>setSt(e.target.value)} style={{ ...inp,width:120 }}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
           </div>
           <Table cols={["#","Student","Avg Score","Grade","Attendance","Fees Status","Position"]}
@@ -2313,11 +2700,11 @@ function Reports({ students,grades,attendance,fees,expenses,school }) {
       {rt==="subject"&&(
         <div>
           <div style={{ display:"flex",gap:8,marginBottom:14 }}>
-            <select value={sc} onChange={e=>setSc(e.target.value)} style={{ ...inp,width:160 }}>{CLASSES.map(c=><option key={c}>{c}</option>)}</select>
+            <select value={sc} onChange={e=>setSc(e.target.value)} style={{ ...inp,width:160 }}>{classes.map(c=><option key={c}>{c}</option>)}</select>
             <select value={st} onChange={e=>setSt(e.target.value)} style={{ ...inp,width:120 }}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
           </div>
           <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))",gap:12 }}>
-            {SUBJECTS.map(sub=>{
+            {subjects.map(sub=>{
               const sg2=grades.filter(g=>g.subject===sub&&g.term===st&&classStu.find(s=>s.id===g.studentId));
               if(!sg2.length) return null;
               const av2=avg(sg2); const pass=sg2.filter(g=>g.score>=50).length;
@@ -2378,7 +2765,7 @@ function Reports({ students,grades,attendance,fees,expenses,school }) {
 }
 
 // ─── ID CARDS ────────────────────────────────────────────────
-function IDCards({ students,users,school }) {
+function IDCards({ students,users,school,classes }) {
   const [type,setType]=useState("student"); const [selId,setSelId]=useState(""); const [preview,setPreview]=useState(null);
   const all=type==="student"?students.filter(s=>s.status==="active"):users.filter(u=>u.active);
   const roleColors={ Admin:"#7c3aed",Headmaster:"#1d4ed8",HOD:"#0369a1",Teacher:"#059669","Account Office":"#d97706",Librarian:"#6d28d9","Non-Teaching Staff":"#6b7280" };
@@ -2455,7 +2842,9 @@ function IDCard({ person,type,school,roleColors }) {
         <div style={{ fontSize:10,opacity:0.8 }}>{school.motto}</div>
       </div>
       <div style={{ background:"#fff",padding:"14px 18px",display:"flex",gap:12 }}>
-        <div style={{ width:54,height:54,borderRadius:10,background:bg+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,flexShrink:0 }}>{type==="student"?"🎒":"👤"}</div>
+        <div style={{ width:54,height:54,borderRadius:10,background:bg+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,flexShrink:0,overflow:"hidden" }}>
+          {person.photo ? <img src={person.photo} alt="" style={{ width:"100%",height:"100%",objectFit:"cover" }}/> : (type==="student"?"🎒":"👤")}
+        </div>
         <div>
           <div style={{ fontSize:14,fontWeight:700,color:"#0f172a" }}>{person.name}</div>
           {type==="student"&&<><div style={{ fontSize:11,color:"#64748b" }}>Class: {person.class}</div><div style={{ fontSize:11,color:"#64748b" }}>Guardian: {person.guardian}</div></>}
@@ -2541,11 +2930,14 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   students,setStudents,grades,setGrades,mockExams,setMockExams,attendance,setAttendance,
   fees,setFees,expenses,setExpenses,payroll,setPayroll,books,setBooks,borrows,setBorrows,
   nurseryLogs,setNurseryLogs,milestones,setMilestones,examSchedule,setExamSchedule,
-  timetables,setTimetables,auditLog,setAuditLog }) {
+  timetables,setTimetables,auditLog,setAuditLog,
+  classes,setClasses,classLevels,setClassLevels,subjects,setSubjects,yearArchive,setYearArchive }) {
   const [form,setForm]=useState({...school}); const [tab,setTab]=useState("school");
   const [resetId,setResetId]=useState(""); const [newPin,setNewPin]=useState("");
   const [importFile,setImportFile]=useState(null); const [importErr,setImportErr]=useState("");
   const fileInputRef = useRef(null);
+  const [newClassName,setNewClassName]=useState(""); const [newClassLevel,setNewClassLevel]=useState("Primary");
+  const [newSubject,setNewSubject]=useState("");
 
   const save=()=>{ setSchool({...form}); addAudit("Updated school settings","Settings"); notify("Settings saved ✅"); };
 
@@ -2555,10 +2947,45 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
     addAudit(`PIN reset for ${resetId}`,"Settings"); notify("PIN reset successfully"); setResetId(""); setNewPin("");
   };
 
+  const addClass=()=>{
+    const name=newClassName.trim();
+    if(!name){ notify("Enter a class name","error"); return; }
+    if(classes.includes(name)){ notify("That class already exists","error"); return; }
+    setClasses(p=>[...p,name]);
+    setClassLevels(p=>({...p,[name]:newClassLevel}));
+    setTimetables(prev=>({ ...prev, [name]: generateTimetable(name, subjects, cls=>({...classLevels,[name]:newClassLevel})[cls]) }));
+    addAudit(`Added class: ${name} (${newClassLevel})`,"Settings");
+    notify(`Class "${name}" added ✅`); setNewClassName("");
+  };
+
+  const removeClass=(cls)=>{
+    const inUse = students.some(s=>s.class===cls && s.status==="active");
+    if(inUse){ notify("Can't remove a class with active students. Move them first.","error"); return; }
+    setClasses(p=>p.filter(c=>c!==cls));
+    setClassLevels(p=>{ const n={...p}; delete n[cls]; return n; });
+    setTimetables(p=>{ const n={...p}; delete n[cls]; return n; });
+    addAudit(`Removed class: ${cls}`,"Settings"); notify("Class removed");
+  };
+
+  const addSubject=()=>{
+    const name=newSubject.trim();
+    if(!name){ notify("Enter a subject name","error"); return; }
+    if(subjects.includes(name)){ notify("That subject already exists","error"); return; }
+    setSubjects(p=>[...p,name]);
+    addAudit(`Added subject: ${name}`,"Settings"); notify(`Subject "${name}" added ✅`); setNewSubject("");
+  };
+
+  const removeSubject=(sub)=>{
+    const inUse = grades.some(g=>g.subject===sub);
+    if(inUse){ notify("Can't remove a subject with existing grade records.","error"); return; }
+    setSubjects(p=>p.filter(s=>s!==sub));
+    addAudit(`Removed subject: ${sub}`,"Settings"); notify("Subject removed");
+  };
+
   const exportData=()=>{
-    const data={ version:"5.1", exportDate:nowStr(),
+    const data={ version:"5.2", exportDate:nowStr(),
       school,users,students,grades,mockExams,attendance,fees,expenses,payroll,books,borrows,
-      nurseryLogs,milestones,examSchedule,timetables,auditLog };
+      nurseryLogs,milestones,examSchedule,timetables,auditLog,classes,classLevels,subjects,yearArchive };
     const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a"); a.href=url; a.download=`EduSmart_Backup_${todayStr()}.json`; a.click();
@@ -2597,6 +3024,10 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
     if(d.examSchedule) setExamSchedule(d.examSchedule);
     if(d.timetables) setTimetables(d.timetables);
     if(d.auditLog) setAuditLog(d.auditLog);
+    if(d.classes) setClasses(d.classes);
+    if(d.classLevels) setClassLevels(d.classLevels);
+    if(d.subjects) setSubjects(d.subjects);
+    if(d.yearArchive) setYearArchive(d.yearArchive);
     addAudit(`Restored backup from ${d.exportDate||"unknown date"}`,"Settings");
     notify("Backup restored ✅"); setImportFile(null);
     if(fileInputRef.current) fileInputRef.current.value="";
@@ -2605,7 +3036,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   return (
     <div>
       <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>⚙️ Settings</h2>
-      <Tabs tabs={[{key:"school",label:"🏫 School Profile"},{key:"security",label:"🔐 Security"},{key:"data",label:"💾 Data & Backup"},{key:"licence",label:"🔑 Licence"}]} active={tab} onChange={setTab}/>
+      <Tabs tabs={[{key:"school",label:"🏫 School Profile"},{key:"classes",label:"🏷️ Classes & Subjects"},{key:"security",label:"🔐 Security"},{key:"data",label:"💾 Data & Backup"},{key:"licence",label:"🔑 Licence"}]} active={tab} onChange={setTab}/>
 
       {tab==="school"&&(
         <Card style={{ padding:24,maxWidth:580 }}>
@@ -2622,6 +3053,46 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
           </div>
           <button onClick={save} style={{ ...btnP,marginTop:16 }}>Save Settings</button>
         </Card>
+      )}
+
+      {tab==="classes"&&(
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
+          <Card style={{ padding:22 }}>
+            <h3 style={{ margin:"0 0 6px",fontSize:16 }}>Classes</h3>
+            <p style={{ fontSize:12,color:"#64748b",marginBottom:14 }}>Add a new class (e.g. a second stream, or a special class). It's immediately available across Students, Grades, Attendance, Exams, and Timetable.</p>
+            <div style={{ display:"flex",gap:8,marginBottom:16 }}>
+              <input value={newClassName} onChange={e=>setNewClassName(e.target.value)} placeholder="e.g. Class 7A" style={{ ...inp,flex:1 }}/>
+              <select value={newClassLevel} onChange={e=>setNewClassLevel(e.target.value)} style={{ ...inp,width:140 }}>
+                {CLASS_LEVELS.map(l=><option key={l}>{l}</option>)}
+              </select>
+              <button onClick={addClass} style={btnP}>+ Add</button>
+            </div>
+            <div style={{ maxHeight:380,overflowY:"auto" }}>
+              {classes.map(cls=>(
+                <div key={cls} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f1f5f9",fontSize:13 }}>
+                  <span>{cls} <Badge text={classLevels[cls]||"Primary"} color="#374151" bg="#f1f5f9"/></span>
+                  <button onClick={()=>removeClass(cls)} style={{ ...btnSm,background:"#fee2e2",color:"#991b1b" }}>Remove</button>
+                </div>
+              ))}
+            </div>
+          </Card>
+          <Card style={{ padding:22 }}>
+            <h3 style={{ margin:"0 0 6px",fontSize:16 }}>Subjects</h3>
+            <p style={{ fontSize:12,color:"#64748b",marginBottom:14 }}>Master subject list used across Grades, Exams, and Timetable. Physical Education and Creative Arts are automatically excluded from formal exam scheduling.</p>
+            <div style={{ display:"flex",gap:8,marginBottom:16 }}>
+              <input value={newSubject} onChange={e=>setNewSubject(e.target.value)} placeholder="e.g. Computing" style={{ ...inp,flex:1 }}/>
+              <button onClick={addSubject} style={btnP}>+ Add</button>
+            </div>
+            <div style={{ maxHeight:380,overflowY:"auto" }}>
+              {subjects.map(sub=>(
+                <div key={sub} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f1f5f9",fontSize:13 }}>
+                  <span>{sub}</span>
+                  <button onClick={()=>removeSubject(sub)} style={{ ...btnSm,background:"#fee2e2",color:"#991b1b" }}>Remove</button>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
       )}
 
       {tab==="security"&&(
