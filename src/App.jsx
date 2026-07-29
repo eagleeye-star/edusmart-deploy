@@ -1,12 +1,55 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
-// ─── LICENCE KEYS ───────────────────────────────────────────
-const LICENCE_KEYS = {
-  "EDUSMART-TRIAL-2024": { type:"trial", expiry:null },
-  "EDUSMART-DEMO-0000":  { type:"trial", expiry:null },
-  "EDUSMART-BASIC-ABCD": { type:"basic", expiry:"2026-12-31" },
-  "EDUSMART-PRO-XYZ9":   { type:"pro",   expiry:"2027-06-30" },
-};
+// ─── LICENCE KEY SCHEME ───────────────────────────────────────
+// Keys are self-validating — they carry their own type and expiry date,
+// checked against a signature, so any key produced by the EduSmart Licence
+// Generator works immediately without needing to be added to a list here.
+// This constant MUST match the same constant in the Licence Generator app —
+// changing it invalidates every key issued before the change.
+const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
+
+function simpleHash(str) {
+  // Small deterministic non-cryptographic checksum (FNV-1a), fine for
+  // licence-gating a desktop product — not meant to resist a determined
+  // attacker decompiling the app, only to stop typos/guessing and let
+  // keys be generated offline without a server round-trip.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36).toUpperCase();
+}
+
+const DAY_MS = 86400000;
+const dayNum = (date) => Math.floor(new Date(date).getTime() / DAY_MS);
+const numToDay = (n) => new Date(n * DAY_MS);
+
+// type: "B" (Basic) or "P" (Pro). expiryDayNum: integer day number, or the
+// string "LIFE" for a lifetime licence.
+function buildLicenceKey(type, expiryDayNum) {
+  const issued = dayNum(new Date()).toString(36).toUpperCase();
+  const expiry = expiryDayNum === "LIFE" ? "LIFE" : expiryDayNum.toString(36).toUpperCase();
+  const payload = `${type}-${issued}-${expiry}`;
+  const checksum = simpleHash(payload + LICENCE_SECRET).slice(0, 5);
+  return `EDU-${payload}-${checksum}`;
+}
+
+function parseLicenceKey(key) {
+  const parts = (key || "").trim().toUpperCase().split("-");
+  if (parts.length !== 5 || parts[0] !== "EDU") return null;
+  const [, type, issued, expiry, checksum] = parts;
+  if (type !== "B" && type !== "P") return null;
+  const payload = `${type}-${issued}-${expiry}`;
+  if (simpleHash(payload + LICENCE_SECRET).slice(0, 5) !== checksum) return null;
+  let expiryDate = null;
+  if (expiry !== "LIFE") {
+    const expiryDayNum = parseInt(expiry, 36);
+    if (isNaN(expiryDayNum)) return null;
+    expiryDate = numToDay(expiryDayNum);
+  }
+  return { type: type === "P" ? "pro" : "basic", expiry: expiryDate, lifetime: expiry === "LIFE" };
+}
 
 // ─── ROLE ACCESS ─────────────────────────────────────────────
 const ROLE_ACCESS = {
@@ -52,105 +95,24 @@ const MILESTONE_RATINGS = ["Not Yet","Emerging","Developing","Achieved"];
 
 // ─── SEED DATA ────────────────────────────────────────────────
 const INITIAL_SCHOOL = {
-  name:"Eikwe Private Basic School", address:"Eikwe, Western Region, Ghana",
-  phone:"0597147460", email:"info@eikwebasic.edu.gh", motto:"Excellence in Education",
-  currentTerm:"Term 2", currentYear:"2024/2025", principalName:"Mr. Gilbert Oscar Prah",
+  name:"", address:"", phone:"", email:"", motto:"",
+  currentTerm:"Term 1", currentYear:"", principalName:"",
 };
 
-const INITIAL_USERS = [
-  { id:"USR001", name:"Gilbert Oscar Prah",  role:"Admin",           pin:"1234", code:"ADM001", email:"admin@school.gh",    active:true, salary:3000, transport:300, housing:500, ssnit:true },
-  { id:"USR002", name:"Mr. Kwame Asante",    role:"Headmaster",      pin:"2345", code:"HM001",  email:"head@school.gh",     active:true, salary:2800, transport:300, housing:400, ssnit:true },
-  { id:"USR003", name:"Mrs. Ama Boateng",    role:"HOD",             pin:"3456", code:"HOD001", email:"hod@school.gh",      active:true, salary:2200, transport:200, housing:300, ssnit:true },
-  { id:"USR004", name:"Mr. Kofi Mensah",     role:"Teacher",         pin:"4567", code:"TCH001", email:"kofi@school.gh",     active:true, classAssigned:"Class 6A", salary:1800, transport:200, housing:0, ssnit:true },
-  { id:"USR005", name:"Ms. Abena Frimpong",  role:"Teacher",         pin:"5678", code:"TCH002", email:"abena@school.gh",    active:true, classAssigned:"Class 5B", salary:1800, transport:200, housing:0, ssnit:true },
-  { id:"USR006", name:"Mrs. Esi Andoh",      role:"Account Office",  pin:"6789", code:"ACC001", email:"accounts@school.gh", active:true, salary:1500, transport:150, housing:0, ssnit:true },
-  { id:"USR007", name:"Mr. Yaw Tetteh",      role:"Librarian",       pin:"7890", code:"LIB001", email:"library@school.gh",  active:true, salary:1200, transport:100, housing:0, ssnit:true },
-  { id:"USR008", name:"Mr. Nana Osei",       role:"Non-Teaching Staff", pin:"8901", code:"NTS001", email:"nts@school.gh",  active:true, salary:900,  transport:80,  housing:0, ssnit:false },
-  { id:"USR009", name:"Ms. Akosua Darko",    role:"Teacher",         pin:"9012", code:"TCH003", email:"akosua@school.gh",   active:true, classAssigned:"KG 1", salary:1600, transport:150, housing:0, ssnit:true },
-];
+const INITIAL_USERS = []; // first-run wizard creates the initial Admin account
 
-const INITIAL_STUDENTS = [
-  { id:"STU001", name:"Kwame Agyei",      class:"Class 6A", dob:"2012-03-15", gender:"Male",   guardian:"Mr. Agyei",    phone:"0241000001", fees:500, paid:500, status:"active", section:"primary" },
-  { id:"STU002", name:"Ama Sarpong",      class:"Class 6A", dob:"2012-07-22", gender:"Female", guardian:"Mrs. Sarpong", phone:"0241000002", fees:500, paid:300, status:"active", section:"primary" },
-  { id:"STU003", name:"Kofi Mensah Jr",   class:"Class 5B", dob:"2013-01-10", gender:"Male",   guardian:"Mr. Mensah",   phone:"0241000003", fees:500, paid:500, status:"active", section:"primary" },
-  { id:"STU004", name:"Abena Osei",       class:"Class 5B", dob:"2013-09-05", gender:"Female", guardian:"Mrs. Osei",    phone:"0241000004", fees:500, paid:200, status:"active", section:"primary" },
-  { id:"STU005", name:"Yaw Darko",        class:"JHS 1",    dob:"2011-11-30", gender:"Male",   guardian:"Mr. Darko",    phone:"0241000005", fees:600, paid:600, status:"active", section:"jhs" },
-  { id:"STU006", name:"Akua Boateng",     class:"JHS 1",    dob:"2011-06-18", gender:"Female", guardian:"Mrs. Boateng", phone:"0241000006", fees:600, paid:400, status:"active", section:"jhs" },
-  { id:"STU007", name:"Kweku Asante",     class:"JHS 2",    dob:"2010-04-25", gender:"Male",   guardian:"Mr. Asante",   phone:"0241000007", fees:600, paid:600, status:"active", section:"jhs" },
-  { id:"STU008", name:"Esi Tetteh",       class:"JHS 3",    dob:"2009-08-12", gender:"Female", guardian:"Mr. Tetteh",   phone:"0241000008", fees:700, paid:350, status:"active", section:"jhs" },
-  { id:"STU009", name:"Kofi Bright",      class:"KG 1",     dob:"2020-05-10", gender:"Male",   guardian:"Mrs. Bright",  phone:"0241000009", fees:400, paid:400, status:"active", section:"nursery" },
-  { id:"STU010", name:"Abena Asare",      class:"KG 2",     dob:"2019-08-22", gender:"Female", guardian:"Mr. Asare",    phone:"0241000010", fees:400, paid:200, status:"active", section:"nursery" },
-  { id:"STU011", name:"Old Graduate",     class:"JHS 3",    dob:"2007-02-01", gender:"Male",   guardian:"Parent",       phone:"0241000011", fees:700, paid:700, status:"graduated", section:"jhs" },
-  { id:"STU012", name:"Dropped Student",  class:"Class 4A", dob:"2014-05-20", gender:"Male",   guardian:"Parent",       phone:"0241000012", fees:500, paid:100, status:"dropout",   section:"primary" },
-];
-
-const INITIAL_GRADES = [
-  { id:"GRD001", studentId:"STU001", subject:"Mathematics",     class:"Class 6A", ca:25, exam:60, score:85, grade:"A", term:"Term 1", year:"2024/2025", enteredBy:"TCH001", date:"2025-01-10" },
-  { id:"GRD002", studentId:"STU001", subject:"English Language",class:"Class 6A", ca:22, exam:56, score:78, grade:"B", term:"Term 1", year:"2024/2025", enteredBy:"TCH001", date:"2025-01-10" },
-  { id:"GRD003", studentId:"STU002", subject:"Mathematics",     class:"Class 6A", ca:28, exam:64, score:92, grade:"A", term:"Term 1", year:"2024/2025", enteredBy:"TCH001", date:"2025-01-10" },
-  { id:"GRD004", studentId:"STU003", subject:"Science",         class:"Class 5B", ca:20, exam:50, score:70, grade:"B", term:"Term 1", year:"2024/2025", enteredBy:"TCH002", date:"2025-01-10" },
-  { id:"GRD005", studentId:"STU005", subject:"Mathematics",     class:"JHS 1",    ca:24, exam:58, score:82, grade:"A", term:"Term 1", year:"2024/2025", enteredBy:"TCH001", date:"2025-01-10" },
-  { id:"GRD006", studentId:"STU008", subject:"Mathematics",     class:"JHS 3",    ca:18, exam:45, score:63, grade:"C", term:"Term 1", year:"2024/2025", enteredBy:"TCH001", date:"2025-01-10" },
-];
-
-const INITIAL_MOCK_EXAMS = [
-  { id:"MCK001", studentId:"STU008", subject:"Mathematics",     score:62, term:"Term 1", year:"2024/2025", examType:"Mock 1", enteredBy:"TCH001", date:"2025-01-12" },
-  { id:"MCK002", studentId:"STU008", subject:"English Language",score:58, term:"Term 1", year:"2024/2025", examType:"Mock 1", enteredBy:"TCH001", date:"2025-01-12" },
-  { id:"MCK003", studentId:"STU007", subject:"Mathematics",     score:75, term:"Term 1", year:"2024/2025", examType:"Mock 1", enteredBy:"TCH001", date:"2025-01-12" },
-];
-
-const INITIAL_ATTENDANCE = [
-  { id:"ATT001", studentId:"STU001", class:"Class 6A", date:"2025-01-13", status:"Present", enteredBy:"TCH001" },
-  { id:"ATT002", studentId:"STU002", class:"Class 6A", date:"2025-01-13", status:"Absent",  enteredBy:"TCH001" },
-  { id:"ATT003", studentId:"STU003", class:"Class 5B", date:"2025-01-13", status:"Present", enteredBy:"TCH002" },
-  { id:"ATT004", studentId:"STU001", class:"Class 6A", date:"2025-01-14", status:"Present", enteredBy:"TCH001" },
-  { id:"ATT005", studentId:"STU002", class:"Class 6A", date:"2025-01-14", status:"Absent",  enteredBy:"TCH001" },
-  { id:"ATT006", studentId:"STU002", class:"Class 6A", date:"2025-01-15", status:"Absent",  enteredBy:"TCH001" },
-];
-
-const INITIAL_FEES = [
-  { id:"FEE001", studentId:"STU001", amount:500, paid:500, balance:0,   term:"Term 1", year:"2024/2025", receiptNo:"RCP001", date:"2025-01-05", enteredBy:"ACC001" },
-  { id:"FEE002", studentId:"STU002", amount:500, paid:300, balance:200, term:"Term 1", year:"2024/2025", receiptNo:"RCP002", date:"2025-01-05", enteredBy:"ACC001" },
-  { id:"FEE003", studentId:"STU005", amount:600, paid:600, balance:0,   term:"Term 1", year:"2024/2025", receiptNo:"RCP003", date:"2025-01-05", enteredBy:"ACC001" },
-  { id:"FEE004", studentId:"STU006", amount:600, paid:400, balance:200, term:"Term 1", year:"2024/2025", receiptNo:"RCP004", date:"2025-01-08", enteredBy:"ACC001" },
-];
-
-const INITIAL_EXPENSES = [
-  { id:"EXP001", description:"Chalk and Stationery",  amount:450, date:"2025-01-03", category:"Supplies",    enteredBy:"ACC001" },
-  { id:"EXP002", description:"Electricity Bill",       amount:320, date:"2025-01-05", category:"Utilities",   enteredBy:"ACC001" },
-  { id:"EXP003", description:"Cleaning Materials",     amount:200, date:"2025-01-07", category:"Maintenance", enteredBy:"ACC001" },
-  { id:"EXP004", description:"Staff Welfare",          amount:800, date:"2025-01-10", category:"Staff",       enteredBy:"ACC001" },
-];
-
-const INITIAL_PAYROLL = [
-  { id:"PAY001", staffId:"USR004", month:"January", year:"2025", baseSalary:1800, transport:200, housing:0, responsibility:0, overtime:0, substitution:0, loans:0, absenceDeductions:0, ssnitEmployee:99, ssnitEmployer:234, paye:45, netPay:0, status:"paid", processedBy:"ACC001", date:"2025-01-31" },
-];
-
-const INITIAL_BOOKS = [
-  { id:"BK001", title:"Mathematics for Basic Schools", author:"GES",      isbn:"978-001", copies:15, available:12, category:"Textbook" },
-  { id:"BK002", title:"English Language Course Book",  author:"GES",      isbn:"978-002", copies:20, available:18, category:"Textbook" },
-  { id:"BK003", title:"Science Made Easy",             author:"Aidoo K.", isbn:"978-003", copies:10, available:9,  category:"Reference" },
-];
-
-const INITIAL_BORROWS = [
-  { id:"BOR001", bookId:"BK001", borrowerId:"STU001", borrowerType:"Student", borrowDate:"2025-01-10", dueDate:"2025-01-24", returnDate:null, enteredBy:"LIB001" },
-];
-
-const INITIAL_NURSERY_LOGS = [
-  { id:"NRS001", studentId:"STU009", date:"2025-01-13", napStart:"09:30", napEnd:"10:30", feedingTimes:"07:30,12:00", feedingNotes:"Ate well", hygiene:"No incidents", mood:"Happy", notes:"Good day", enteredBy:"TCH003" },
-];
-
-const INITIAL_MILESTONES = [
-  { id:"MLS001", studentId:"STU009", category:"Motor Skills", milestone:"Walking steadily", rating:"Achieved",   term:"Term 1", year:"2024/2025", enteredBy:"TCH003", date:"2025-01-10" },
-  { id:"MLS002", studentId:"STU009", category:"Language",     milestone:"Two-word phrases", rating:"Developing", term:"Term 1", year:"2024/2025", enteredBy:"TCH003", date:"2025-01-10" },
-  { id:"MLS003", studentId:"STU010", category:"Self-Care",    milestone:"Potty trained",    rating:"Emerging",   term:"Term 1", year:"2024/2025", enteredBy:"TCH003", date:"2025-01-10" },
-];
-
-const INITIAL_EXAM_SCHEDULE = [
-  { id:"EXM001", class:"JHS 3",    subject:"Mathematics",     date:"2025-02-10", startTime:"08:00", endTime:"10:00", venue:"Main Hall",  createdBy:"ADM001" },
-  { id:"EXM002", class:"JHS 3",    subject:"English Language",date:"2025-02-11", startTime:"08:00", endTime:"10:00", venue:"Main Hall",  createdBy:"ADM001" },
-  { id:"EXM003", class:"Class 6A", subject:"Mathematics",     date:"2025-02-10", startTime:"10:30", endTime:"12:00", venue:"Classroom",  createdBy:"ADM001" },
-];
+const INITIAL_STUDENTS = [];
+const INITIAL_GRADES = [];
+const INITIAL_MOCK_EXAMS = [];
+const INITIAL_ATTENDANCE = [];
+const INITIAL_FEES = [];
+const INITIAL_EXPENSES = [];
+const INITIAL_PAYROLL = [];
+const INITIAL_BOOKS = [];
+const INITIAL_BORROWS = [];
+const INITIAL_NURSERY_LOGS = [];
+const INITIAL_MILESTONES = [];
+const INITIAL_EXAM_SCHEDULE = [];
 
 // Auto-generate a Monday-Friday timetable for every class so all 20 classes
 // (Creche through JHS 3) have a starting timetable instead of just 2 hardcoded ones.
@@ -213,11 +175,7 @@ function nextAcademicYear(yearStr) {
 }
 
 
-const AUDIT_LOG_INITIAL = [
-  { id:"AUD001", user:"ADM001", action:"System Setup",        section:"Settings", timestamp:"2025-01-01 08:00:00" },
-  { id:"AUD002", user:"TCH001", action:"Entered Grades",      section:"Grades",   timestamp:"2025-01-10 09:15:00" },
-  { id:"AUD003", user:"ACC001", action:"Recorded Fee Payment",section:"Finance",  timestamp:"2025-01-05 10:30:00" },
-];
+const AUDIT_LOG_INITIAL = [];
 
 // ─── HELPERS ──────────────────────────────────────────────────
 const calcGrade = s => s>=80?"A":s>=70?"B":s>=60?"C":s>=50?"D":s>=45?"E":"F";
@@ -324,13 +282,24 @@ function Badge({ text, color, bg }) {
   return <span style={{ background:bg||color+"22",color,padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:600 }}>{text}</span>;
 }
 
-function Table({ cols, rows, emptyMsg }) {
+function Table({ cols, rows, emptyMsg, sortState, colKeys }) {
   return (
     <div style={{ background:"#fff",borderRadius:12,overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
       <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
         <thead>
           <tr style={{ background:"#f8fafc" }}>
-            {cols.map(c=><th key={c} style={{ padding:"10px 12px",textAlign:"left",fontWeight:600,color:"#374151",borderBottom:"1px solid #e5e7eb",whiteSpace:"nowrap" }}>{c}</th>)}
+            {cols.map((c,i)=>{
+              const key = colKeys?.[i];
+              const sortable = sortState && key;
+              const active = sortable && sortState.sortKey===key;
+              return (
+                <th key={c} onClick={()=>sortable&&sortState.onSort(key)}
+                  style={{ padding:"10px 12px",textAlign:"left",fontWeight:600,color:"#374151",borderBottom:"1px solid #e5e7eb",whiteSpace:"nowrap",
+                    cursor:sortable?"pointer":"default",userSelect:"none" }}>
+                  {c}{sortable&&<span style={{ marginLeft:4,fontSize:10,color:active?"#1e40af":"#cbd5e1" }}>{active?(sortState.sortDir==="asc"?"▲":"▼"):"▲▼"}</span>}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>{rows}</tbody>
@@ -338,6 +307,34 @@ function Table({ cols, rows, emptyMsg }) {
       {(!rows||rows.length===0)&&<p style={{ textAlign:"center",color:"#9ca3af",padding:24 }}>{emptyMsg||"No records found."}</p>}
     </div>
   );
+}
+
+// Generic client-side sort: pass the raw array, get back a sorted copy plus
+// header click state. Handles strings, numbers, and null/undefined gracefully.
+function useSort(data, defaultKey=null, defaultDir="asc") {
+  const [sortKey, setSortKey] = useState(defaultKey);
+  const [sortDir, setSortDir] = useState(defaultDir);
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir(d=>d==="asc"?"desc":"asc");
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+  const sorted = useMemo(() => {
+    if (!sortKey) return data;
+    const arr = [...data];
+    arr.sort((a,b) => {
+      let av = a?.[sortKey], bv = b?.[sortKey];
+      if (av==null && bv==null) return 0;
+      if (av==null) return 1;
+      if (bv==null) return -1;
+      if (typeof av === "string") av = av.toLowerCase();
+      if (typeof bv === "string") bv = bv.toLowerCase();
+      if (av < bv) return sortDir==="asc"?-1:1;
+      if (av > bv) return sortDir==="asc"?1:-1;
+      return 0;
+    });
+    return arr;
+  }, [data, sortKey, sortDir]);
+  return { sorted, sortKey, sortDir, onSort: toggleSort };
 }
 
 function TD({ children, bold, color, small }) {
@@ -359,10 +356,25 @@ function Tabs({ tabs, active, onChange }) {
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────
+// ─── LOCAL PERSISTENCE ──────────────────────────────────────────
+// Everything used to live only in memory — closing the app lost all data,
+// even a paid licence activation. This saves the whole app state to the
+// device's local storage and reloads it on startup. It's per-device only;
+// it is NOT multi-device sync (that's a separate, larger project).
+const STORAGE_KEY = "edusmart_appdata_v1";
+function loadPersisted() {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
 export default function EduSmart() {
-  const [licenced,  setLicenced]  = useState(false);
+  const persisted = loadPersisted();
+
+  const [licenced,  setLicenced]  = useState(!!persisted?.licenced);
   const [licKey,    setLicKey]    = useState("");
-  const [licInfo,   setLicInfo]   = useState(null);
+  const [licInfo,   setLicInfo]   = useState(persisted?.licInfo || null);
   const [licErr,    setLicErr]    = useState("");
   const [loggedIn,  setLoggedIn]  = useState(false);
   const [curUser,   setCurUser]   = useState(null);
@@ -377,28 +389,57 @@ export default function EduSmart() {
   const [lastActivity, setLastActivity] = useState(Date.now());
   const [failedLogins, setFailedLogins] = useState({});
 
-  const [school,     setSchool]     = useState(INITIAL_SCHOOL);
-  const [users,      setUsers]      = useState(INITIAL_USERS);
-  const [students,   setStudents]   = useState(INITIAL_STUDENTS);
-  const [grades,     setGrades]     = useState(INITIAL_GRADES);
-  const [mockExams,  setMockExams]  = useState(INITIAL_MOCK_EXAMS);
-  const [attendance, setAttendance] = useState(INITIAL_ATTENDANCE);
-  const [fees,       setFees]       = useState(INITIAL_FEES);
-  const [expenses,   setExpenses]   = useState(INITIAL_EXPENSES);
-  const [payroll,    setPayroll]    = useState(INITIAL_PAYROLL);
-  const [books,      setBooks]      = useState(INITIAL_BOOKS);
-  const [borrows,    setBorrows]    = useState(INITIAL_BORROWS);
-  const [nurseryLogs,setNurseryLogs]= useState(INITIAL_NURSERY_LOGS);
-  const [milestones, setMilestones] = useState(INITIAL_MILESTONES);
-  const [examSchedule,setExamSchedule]=useState(INITIAL_EXAM_SCHEDULE);
-  const [timetables, setTimetables] = useState(DEFAULT_TIMETABLES);
-  const [classes, setClasses] = useState([...DEFAULT_CLASSES]);
-  const [classLevels, setClassLevels] = useState({...DEFAULT_CLASS_LEVELS});
-  const [subjects, setSubjects] = useState([...DEFAULT_SUBJECTS]);
-  const [yearArchive, setYearArchive] = useState({}); // year -> snapshot, populated at each promotion run
-  const [auditLog,   setAuditLog]   = useState(AUDIT_LOG_INITIAL);
+  const [school,     setSchool]     = useState(persisted?.school ?? INITIAL_SCHOOL);
+  const [users,      setUsers]      = useState(persisted?.users ?? INITIAL_USERS);
+  const [students,   setStudents]   = useState(persisted?.students ?? INITIAL_STUDENTS);
+  const [grades,     setGrades]     = useState(persisted?.grades ?? INITIAL_GRADES);
+  const [mockExams,  setMockExams]  = useState(persisted?.mockExams ?? INITIAL_MOCK_EXAMS);
+  const [attendance, setAttendance] = useState(persisted?.attendance ?? INITIAL_ATTENDANCE);
+  const [fees,       setFees]       = useState(persisted?.fees ?? INITIAL_FEES);
+  const [expenses,   setExpenses]   = useState(persisted?.expenses ?? INITIAL_EXPENSES);
+  const [payroll,    setPayroll]    = useState(persisted?.payroll ?? INITIAL_PAYROLL);
+  const [books,      setBooks]      = useState(persisted?.books ?? INITIAL_BOOKS);
+  const [borrows,    setBorrows]    = useState(persisted?.borrows ?? INITIAL_BORROWS);
+  const [nurseryLogs,setNurseryLogs]= useState(persisted?.nurseryLogs ?? INITIAL_NURSERY_LOGS);
+  const [milestones, setMilestones] = useState(persisted?.milestones ?? INITIAL_MILESTONES);
+  const [examSchedule,setExamSchedule]=useState(persisted?.examSchedule ?? INITIAL_EXAM_SCHEDULE);
+  const [timetables, setTimetables] = useState(persisted?.timetables ?? DEFAULT_TIMETABLES);
+  const [classes, setClasses] = useState(persisted?.classes ?? [...DEFAULT_CLASSES]);
+  const [classLevels, setClassLevels] = useState(persisted?.classLevels ?? {...DEFAULT_CLASS_LEVELS});
+  const [subjects, setSubjects] = useState(persisted?.subjects ?? [...DEFAULT_SUBJECTS]);
+  const [yearArchive, setYearArchive] = useState(persisted?.yearArchive ?? {}); // year -> snapshot, populated at each promotion run
+  const [auditLog,   setAuditLog]   = useState(persisted?.auditLog ?? AUDIT_LOG_INITIAL);
+
+  // Save everything back to local storage shortly after any change.
+  // Debounced so rapid typing doesn't write to disk on every keystroke.
+  const saveTimer = useRef(null);
+  useEffect(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      try {
+        const blob = { licenced, licInfo, school, users, students, grades, mockExams, attendance, fees,
+          expenses, payroll, books, borrows, nurseryLogs, milestones, examSchedule, timetables,
+          classes, classLevels, subjects, yearArchive, auditLog };
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(blob));
+      } catch (e) { /* storage full or unavailable — data stays in memory for this session */ }
+    }, 500);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, [licenced, licInfo, school, users, students, grades, mockExams, attendance, fees, expenses,
+      payroll, books, borrows, nurseryLogs, milestones, examSchedule, timetables,
+      classes, classLevels, subjects, yearArchive, auditLog]);
 
   const notify = (msg, type="success") => { setNotif({msg,type}); setTimeout(()=>setNotif(null),3500); };
+
+  // Re-check expiry on every launch — a persisted licence that has since
+  // expired should re-lock the app rather than staying active forever.
+  useEffect(() => {
+    if (licenced && licInfo && !licInfo.lifetime && licInfo.expiry) {
+      if (new Date(licInfo.expiry) < new Date()) {
+        setLicenced(false);
+        setLicErr("Your licence has expired. Please enter a new key to continue.");
+      }
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addAudit = useCallback((action, sec) => {
     if (!curUser) return;
@@ -443,26 +484,38 @@ export default function EduSmart() {
           <h1 style={{ fontSize:28,fontWeight:700,color:"#0f172a",margin:"8px 0 4px" }}>EduSmart</h1>
           <p style={{ color:"#64748b",margin:0,fontSize:13 }}>School Manager v5.0</p>
         </div>
-        <div style={{ background:"#f0f9ff",borderRadius:10,padding:14,marginBottom:20,borderLeft:"4px solid #0ea5e9",fontSize:12,color:"#0369a1" }}>
-          <strong>Trial Key:</strong> EDUSMART-TRIAL-2024 &nbsp;|&nbsp; <strong>Demo:</strong> EDUSMART-DEMO-0000
-        </div>
         <Row label="Licence Key">
-          <input value={licKey} onChange={e=>setLicKey(e.target.value.toUpperCase())} placeholder="EDUSMART-XXXXX-XXXX"
+          <input value={licKey} onChange={e=>setLicKey(e.target.value.toUpperCase())} placeholder="EDU-XXXXX-XXXXX-XXXXX-XXXXX"
             style={inp} onKeyDown={e=>e.key==="Enter"&&activateLicence()}/>
         </Row>
         {licErr&&<p style={{ color:"#dc2626",fontSize:13,marginBottom:10 }}>{licErr}</p>}
         <button onClick={activateLicence} style={{ ...btnP,width:"100%",padding:12,fontSize:15 }}>Activate & Continue</button>
-        <p style={{ textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:12 }}>Purchase: 0597147460 | aifarms101@gmail.com</p>
+        <p style={{ textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:12 }}>Purchase: 0597147460 | eagleeyefx1@gmail.com</p>
       </div>
     </div>
   );
 
   function activateLicence() {
-    const k = LICENCE_KEYS[licKey.trim()];
-    if (!k) { setLicErr("Invalid key. Contact EduSmart support."); return; }
-    if (k.expiry && new Date(k.expiry)<new Date()) { setLicErr("Licence expired. Please renew."); return; }
-    setLicInfo({...k,key:licKey.trim()}); setLicenced(true); setLicErr("");
+    const k = parseLicenceKey(licKey);
+    if (!k) { setLicErr("Invalid licence key. Please check it and try again, or contact EduSmart support."); return; }
+    if (!k.lifetime && k.expiry && k.expiry < new Date()) { setLicErr("This licence key has expired. Please renew."); return; }
+    setLicInfo({ type:k.type, expiry:k.lifetime?null:k.expiry?.toISOString().split("T")[0], lifetime:k.lifetime, key:licKey.trim().toUpperCase() });
+    setLicenced(true); setLicErr("");
   }
+
+  // ─── FIRST-RUN SETUP WIZARD ───
+  // Runs once: when the licence is active but no staff exist yet (a brand new
+  // install). Creates the school profile and the first Admin account.
+  if (users.length === 0) return (
+    <FirstRunWizard
+      onComplete={({ schoolInfo, adminUser }) => {
+        setSchool(prev=>({ ...prev, ...schoolInfo }));
+        setUsers([adminUser]);
+        setAuditLog(p=>[...p,{ id:uid("AUD"), user:adminUser.code, action:"First-run setup completed — school and admin account created", section:"Settings", timestamp:nowStr() }]);
+      }}
+      licInfo={licInfo}
+    />
+  );
 
   // ─── LOGIN SCREEN ───
   if (!loggedIn) return (
@@ -472,7 +525,7 @@ export default function EduSmart() {
           <div style={{ fontSize:36 }}>🔐</div>
           <h2 style={{ fontSize:22,fontWeight:700,color:"#0f172a",margin:"8px 0 4px" }}>Staff Login</h2>
           <p style={{ color:"#64748b",fontSize:13,margin:"0 0 6px" }}>{school.name}</p>
-          <Badge text={`${licInfo?.type?.toUpperCase()} LICENCE`} color={licInfo?.type==="trial"?"#92400e":"#166534"} bg={licInfo?.type==="trial"?"#fef3c7":"#dcfce7"}/>
+          <Badge text={`${licInfo?.type?.toUpperCase()} LICENCE${licInfo?.lifetime?" · LIFETIME":""}`} color={licInfo?.type==="pro"?"#166534":"#1d4ed8"} bg={licInfo?.type==="pro"?"#dcfce7":"#dbeafe"}/>
         </div>
         <Row label="Select Your Name">
           <select value={selUser} onChange={e=>setSelUser(e.target.value)} style={inp}>
@@ -667,7 +720,82 @@ export default function EduSmart() {
   );
 }
 
-// ─── DASHBOARD ───────────────────────────────────────────────
+// ─── FIRST-RUN SETUP WIZARD ────────────────────────────────────
+// Shown once on a brand new install: no staff exist yet, so there's no one
+// to log in as. Walks through school profile + the first Admin account,
+// then hands both back to the App to seed state and log the new admin in.
+function FirstRunWizard({ onComplete, licInfo }) {
+  const [step, setStep] = useState(1);
+  const [schoolInfo, setSchoolInfo] = useState({ name:"", address:"", phone:"", email:"", motto:"", currentYear:"", principalName:"" });
+  const [admin, setAdmin] = useState({ name:"", pin:"", confirmPin:"", email:"" });
+  const [err, setErr] = useState("");
+
+  const nextFromSchool = () => {
+    if (!schoolInfo.name.trim()) { setErr("Enter your school's name to continue."); return; }
+    setErr(""); setStep(2);
+  };
+
+  const finish = () => {
+    if (!admin.name.trim()) { setErr("Enter your name."); return; }
+    if (!/^\d{4}$/.test(admin.pin)) { setErr("PIN must be exactly 4 digits."); return; }
+    if (admin.pin !== admin.confirmPin) { setErr("PINs don't match."); return; }
+    setErr("");
+    const adminUser = {
+      id: uid("USR"), name: admin.name.trim(), role: "Admin", pin: admin.pin,
+      code: "ADM001", email: admin.email.trim(), active: true,
+      salary: 0, transport: 0, housing: 0, ssnit: true,
+    };
+    onComplete({
+      schoolInfo: { ...schoolInfo, principalName: schoolInfo.principalName || admin.name.trim() },
+      adminUser,
+    });
+  };
+
+  return (
+    <div style={{ minHeight:"100vh",background:"linear-gradient(135deg,#0f172a,#1e3a5f)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Segoe UI',sans-serif",padding:16 }}>
+      <div style={{ background:"#fff",borderRadius:16,padding:40,maxWidth:480,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.4)" }}>
+        <div style={{ textAlign:"center",marginBottom:24 }}>
+          <div style={{ fontSize:44 }}>🎉</div>
+          <h1 style={{ fontSize:24,fontWeight:700,color:"#0f172a",margin:"8px 0 4px" }}>Welcome to EduSmart</h1>
+          <p style={{ color:"#64748b",margin:0,fontSize:13 }}>Let's set up your school — {step===1?"Step 1 of 2":"Step 2 of 2"}</p>
+        </div>
+
+        {step===1 && (
+          <>
+            <h3 style={{ fontSize:15,margin:"0 0 14px",color:"#0f172a" }}>🏫 School Profile</h3>
+            <Row label="School Name"><input value={schoolInfo.name} onChange={e=>setSchoolInfo(p=>({...p,name:e.target.value}))} style={inp} placeholder="e.g. Eikwe Private Basic School"/></Row>
+            <Row label="Address"><input value={schoolInfo.address} onChange={e=>setSchoolInfo(p=>({...p,address:e.target.value}))} style={inp} placeholder="e.g. Eikwe, Western Region, Ghana"/></Row>
+            <Row label="Phone"><input value={schoolInfo.phone} onChange={e=>setSchoolInfo(p=>({...p,phone:e.target.value}))} style={inp}/></Row>
+            <Row label="Email"><input value={schoolInfo.email} onChange={e=>setSchoolInfo(p=>({...p,email:e.target.value}))} style={inp}/></Row>
+            <Row label="Academic Year"><input value={schoolInfo.currentYear} onChange={e=>setSchoolInfo(p=>({...p,currentYear:e.target.value}))} style={inp} placeholder="e.g. 2025/2026"/></Row>
+            {err&&<p style={{ color:"#dc2626",fontSize:13,marginBottom:10 }}>{err}</p>}
+            <button onClick={nextFromSchool} style={{ ...btnP,width:"100%",padding:12,fontSize:15 }}>Continue →</button>
+          </>
+        )}
+
+        {step===2 && (
+          <>
+            <h3 style={{ fontSize:15,margin:"0 0 14px",color:"#0f172a" }}>👤 Create Your Admin Account</h3>
+            <p style={{ fontSize:12,color:"#64748b",marginBottom:14 }}>This is your own login — you'll use it every time you open EduSmart, and you can add other staff accounts once you're in.</p>
+            <Row label="Your Full Name"><input value={admin.name} onChange={e=>setAdmin(p=>({...p,name:e.target.value}))} style={inp} placeholder="e.g. Gilbert Oscar Prah"/></Row>
+            <Row label="Email (optional)"><input value={admin.email} onChange={e=>setAdmin(p=>({...p,email:e.target.value}))} style={inp}/></Row>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <Row label="Choose a 4-digit PIN"><input type="password" maxLength={4} value={admin.pin} onChange={e=>setAdmin(p=>({...p,pin:e.target.value.replace(/\D/g,"")}))} style={inp}/></Row>
+              <Row label="Confirm PIN"><input type="password" maxLength={4} value={admin.confirmPin} onChange={e=>setAdmin(p=>({...p,confirmPin:e.target.value.replace(/\D/g,"")}))} style={inp}/></Row>
+            </div>
+            {err&&<p style={{ color:"#dc2626",fontSize:13,marginBottom:10 }}>{err}</p>}
+            <div style={{ display:"flex",gap:8,marginTop:8 }}>
+              <button onClick={()=>setStep(1)} style={{ ...btnS,flex:1 }}>← Back</button>
+              <button onClick={finish} style={{ ...btnP,flex:2 }}>Finish Setup</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 function Dashboard({ school,students,fees,expenses,attendance,grades,books,borrows,users,curUser,absentAlerts,feeAlerts,overdueBooks,noStock,payroll,examSchedule,mockExams }) {
   if (curUser?.role === "Teacher") {
     return <TeacherDashboard school={school} students={students} grades={grades} attendance={attendance}
@@ -872,6 +1000,7 @@ function Students({ students,setStudents,notify,addAudit,curUser,classes,classLe
     const matchStatus = fs==="all"||s.status===fs;
     return matchSearch&&matchClass&&matchStatus;
   });
+  const sort = useSort(filtered, "name");
 
   const save = () => {
     if(!form.name||!form.class){ notify("Name and Class required","error"); return; }
@@ -918,7 +1047,9 @@ function Students({ students,setStudents,notify,addAudit,curUser,classes,classLe
         </Modal>
       )}
       <Table cols={["ID","Name","Class","Gender","Guardian","Phone","Fees","Paid","Balance","Status","Actions"]}
-        rows={filtered.map(s=>(
+        colKeys={[null,"name","class","gender","guardian","phone","fees","paid",null,"status",null]}
+        sortState={sort}
+        rows={sort.sorted.map(s=>(
           <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
             <TD small color="#6b7280">{s.id}</TD>
             <TD bold>{s.name}</TD>
@@ -1149,6 +1280,7 @@ function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser,classes,
 
   const [staffSearch,setStaffSearch]=useState(initialSearch||"");
   const filtered = users.filter(u=>(!filterRole||u.role===filterRole)&&(!staffSearch||u.name.toLowerCase().includes(staffSearch.toLowerCase())||u.code.toLowerCase().includes(staffSearch.toLowerCase())));
+  const sort = useSort(filtered, "name");
 
   return (
     <div>
@@ -1186,7 +1318,9 @@ function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser,classes,
         </Modal>
       )}
       <Table cols={["ID","Code","Name","Role","Class","Email","Status","Locked","Actions"]}
-        rows={filtered.map(u=>{
+        colKeys={[null,"code","name","role","classAssigned","email","active",null,null]}
+        sortState={sort}
+        rows={sort.sorted.map(u=>{
           const locked=(failedLogins[u.id]||0)>=3;
           return (
             <tr key={u.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
@@ -1221,7 +1355,8 @@ function Grades({ grades,setGrades,students,curUser,notify,addAudit,classes,subj
   const filtered=grades.filter(g=>{
     const s=students.find(x=>x.id===g.studentId);
     return (!fc||s?.class===fc)&&(!fsub||g.subject===fsub)&&(!fterm||g.term===fterm)&&(!isTeacher||s?.class===myClass);
-  });
+  }).map(g=>({ ...g, studentName: students.find(x=>x.id===g.studentId)?.name||g.studentId, className: students.find(x=>x.id===g.studentId)?.class }));
+  const sort = useSort(filtered, "studentName");
 
   const totalScore=(ca,exam)=>Math.min(30,+ca)+Math.min(70,+exam);
 
@@ -1271,7 +1406,9 @@ function Grades({ grades,setGrades,students,curUser,notify,addAudit,classes,subj
         </Modal>
       )}
       <Table cols={["Student","Class","Subject","CA/30","Exam/70","Total","Grade","Term","By","Date","Actions"]}
-        rows={filtered.map(g=>{
+        colKeys={["studentName","className","subject","ca","exam","score","grade","term","enteredBy","date",null]}
+        sortState={sort}
+        rows={sort.sorted.map(g=>{
           const s=students.find(x=>x.id===g.studentId);
           return (
             <tr key={g.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
@@ -1304,6 +1441,9 @@ function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,cu
   const [sf,setSf]=useState(schedBlank); const [mf,setMf]=useState(mockBlank);
 
   const jhs3 = students.filter(s=>s.class==="JHS 3"&&s.status==="active");
+  const examSort = useSort(examSchedule, "date");
+  const mockEnriched = mockExams.map(m=>({ ...m, studentName: students.find(x=>x.id===m.studentId)?.name||m.studentId, className: students.find(x=>x.id===m.studentId)?.class }));
+  const mockSort = useSort(mockEnriched, "date", "desc");
 
   const saveSched=()=>{
     if(!sf.date||!sf.subject){ notify("Date and subject required","error"); return; }
@@ -1353,7 +1493,9 @@ function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,cu
             </Modal>
           )}
           <Table cols={["Class","Subject","Date","Time","Venue","Added By"]}
-            rows={[...examSchedule].sort((a,b)=>a.date.localeCompare(b.date)).map(e=>(
+            colKeys={["class","subject","date","startTime","venue","createdBy"]}
+            sortState={examSort}
+            rows={examSort.sorted.map(e=>(
               <tr key={e.id} style={{ borderBottom:"1px solid #f1f5f9",background:e.date===todayStr()?"#fffbeb":"#fff" }}>
                 <td style={{ padding:"8px 12px" }}><Badge text={e.class} color="#1d4ed8" bg="#dbeafe"/></td>
                 <TD bold>{e.subject}</TD>
@@ -1385,7 +1527,9 @@ function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,cu
             </Modal>
           )}
           <Table cols={["Student","Class","Subject","Score","Grade","Type","Term","By","Date"]}
-            rows={[...mockExams].reverse().map(m=>{
+            colKeys={["studentName","className","subject","score",null,"examType","term","enteredBy","date"]}
+            sortState={mockSort}
+            rows={mockSort.sorted.map(m=>{
               const s=students.find(x=>x.id===m.studentId);
               return (
                 <tr key={m.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
@@ -1646,6 +1790,7 @@ function YearHistory({ yearArchive }) {
 
   const snapshotClasses = archive ? [...new Set(archive.studentsSnapshot.map(s=>s.class))].sort() : [];
   const filteredSnapshot = archive ? archive.studentsSnapshot.filter(s=>!classFilter||s.class===classFilter) : [];
+  const rosterSort = useSort(filteredSnapshot, "name");
 
   return (
     <div>
@@ -1713,7 +1858,9 @@ function YearHistory({ yearArchive }) {
                   </select>
                 </div>
                 <Table cols={["Student","Class at Close","Status"]}
-                  rows={filteredSnapshot.map(s=>(
+                  colKeys={["name","class","status"]}
+                  sortState={rosterSort}
+                  rows={rosterSort.sorted.map(s=>(
                     <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
                       <TD bold>{s.name}</TD><TD>{s.class}</TD>
                       <td style={{ padding:"8px 12px" }}><Badge text={s.status} color={s.status==="active"?"#166534":s.status==="graduated"?"#1d4ed8":"#991b1b"} bg={s.status==="active"?"#dcfce7":s.status==="graduated"?"#dbeafe":"#fee2e2"}/></td>
@@ -1749,7 +1896,9 @@ function Attendance({ attendance,setAttendance,students,curUser,notify,addAudit,
   const statusColor=s=>s==="Present"?"#16a34a":s==="Absent"?"#dc2626":s==="Late"?"#d97706":"#6b7280";
   const statusBg=s=>s==="Present"?"#dcfce7":s==="Absent"?"#fee2e2":s==="Late"?"#fef3c7":"#f3f4f6";
 
-  const history=[...attendance].sort((a,b)=>b.date.localeCompare(a.date)).filter(a=>!isTeacher||a.class===myClass);
+  const history=[...attendance].sort((a,b)=>b.date.localeCompare(a.date)).filter(a=>!isTeacher||a.class===myClass)
+    .map(a=>({ ...a, studentName: students.find(x=>x.id===a.studentId)?.name||a.studentId }));
+  const historySort = useSort(history.slice(0,60), "date", "desc");
 
   // Attendance summary per student
   const summary=students.filter(s=>s.status==="active"&&(!isTeacher||s.class===myClass)).map(s=>{
@@ -1758,6 +1907,7 @@ function Attendance({ attendance,setAttendance,students,curUser,notify,addAudit,
     const rate=all.length?Math.round((present/all.length)*100):100;
     return {...s,total:all.length,present,rate};
   }).sort((a,b)=>a.rate-b.rate);
+  const summarySort = useSort(summary, "rate");
 
   return (
     <div>
@@ -1805,7 +1955,9 @@ function Attendance({ attendance,setAttendance,students,curUser,notify,addAudit,
 
       {view==="history"&&(
         <Table cols={["Date","Student","Class","Status","By"]}
-          rows={history.slice(0,60).map(a=>{
+          colKeys={["date","studentName","class","status","enteredBy"]}
+          sortState={historySort}
+          rows={historySort.sorted.map(a=>{
             const s=students.find(x=>x.id===a.studentId);
             return (
               <tr key={a.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
@@ -1819,7 +1971,9 @@ function Attendance({ attendance,setAttendance,students,curUser,notify,addAudit,
 
       {view==="summary"&&(
         <Table cols={["Student","Class","Days Recorded","Present","Rate","Alert"]}
-          rows={summary.map(s=>(
+          colKeys={["name","class","total","present","rate",null]}
+          sortState={summarySort}
+          rows={summarySort.sorted.map(s=>(
             <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9",background:s.rate<70?"#fff7f7":"#fff" }}>
               <TD bold>{s.name}</TD><TD small>{s.class}</TD><TD>{s.total}</TD><TD>{s.present}</TD>
               <td style={{ padding:"8px 12px" }}>
@@ -1846,6 +2000,9 @@ function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school
   const [feeForm,setFeeForm]=useState({ studentId:"",amount:"",paid:"",term:"Term 2",year:"2024/2025" });
   const [expForm,setExpForm]=useState({ description:"",amount:"",category:"Supplies",date:todayStr() });
   const [period,setPeriod]=useState("monthly");
+  const feesEnriched = fees.map(f=>({ ...f, studentName: students.find(x=>x.id===f.studentId)?.name, className: students.find(x=>x.id===f.studentId)?.class }));
+  const feesSort = useSort(feesEnriched, "date", "desc");
+  const expensesSort = useSort(expenses, "date", "desc");
 
   const saveFee=()=>{
     if(!feeForm.studentId||!feeForm.paid){ notify("Student and amount required","error"); return; }
@@ -1950,7 +2107,9 @@ function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school
             </Modal>
           )}
           <Table cols={["Receipt","Student","Class","Amount","Paid","Balance","Term","Date","By"]}
-            rows={[...fees].reverse().map(f=>{ const s=students.find(x=>x.id===f.studentId); return (
+            colKeys={["receiptNo","studentName","className","amount","paid","balance","term","date","enteredBy"]}
+            sortState={feesSort}
+            rows={feesSort.sorted.map(f=>{ const s=students.find(x=>x.id===f.studentId); return (
               <tr key={f.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
                 <TD small color="#6b7280">{f.receiptNo}</TD>
                 <TD bold>{s?.name}</TD><TD small>{s?.class}</TD>
@@ -1984,7 +2143,9 @@ function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school
             </Modal>
           )}
           <Table cols={["Description","Amount","Category","Date","By"]}
-            rows={[...expenses].reverse().map(e=>(
+            colKeys={["description","amount","category","date","enteredBy"]}
+            sortState={expensesSort}
+            rows={expensesSort.sorted.map(e=>(
               <tr key={e.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
                 <TD bold>{e.description}</TD>
                 <TD color="#d97706" bold>{formatGHS(e.amount)}</TD>
@@ -2027,6 +2188,8 @@ function Payroll({ payroll,setPayroll,users,curUser,notify,addAudit }) {
   const [selMonth,setSelMonth]=useState("January"); const [selYear,setSelYear]=useState("2025");
   const [showForm,setShowForm]=useState(false);
   const months=["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const payrollEnriched = payroll.map(p=>({ ...p, staffName: users.find(x=>x.id===p.staffId)?.name }));
+  const payrollSort = useSort(payrollEnriched, "date", "desc");
 
   const staff=users.filter(u=>u.active);
   const su=staff.find(u=>u.id===selStaff);
@@ -2122,7 +2285,9 @@ function Payroll({ payroll,setPayroll,users,curUser,notify,addAudit }) {
 
       {tab==="history"&&(
         <Table cols={["Staff","Month","Year","Gross","Net Pay","SSNIT(Er)","PAYE","Status","By"]}
-          rows={[...payroll].reverse().map(p=>{ const u=users.find(x=>x.id===p.staffId); return (
+          colKeys={["staffName","month","year","gross","netPay","ssnitEmployer","paye","status","processedBy"]}
+          sortState={payrollSort}
+          rows={payrollSort.sorted.map(p=>{ const u=users.find(x=>x.id===p.staffId); return (
             <tr key={p.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
               <TD bold>{u?.name}</TD><TD>{p.month}</TD><TD>{p.year}</TD>
               <TD>{formatGHS(p.gross)}</TD>
@@ -2199,6 +2364,10 @@ function Library({ books,setBooks,borrows,setBorrows,students,users,curUser,noti
   };
 
   const filtered=books.filter(b=>b.title.toLowerCase().includes(search.toLowerCase())||b.author.toLowerCase().includes(search.toLowerCase()));
+  const booksSort = useSort(filtered, "title");
+  const borrowsEnriched = borrows.map(b=>({ ...b, bookTitle: books.find(x=>x.id===b.bookId)?.title,
+    borrowerName: (b.borrowerType==="Student"?students:users).find(x=>x.id===b.borrowerId)?.name }));
+  const borrowsSort = useSort(borrowsEnriched, "borrowDate", "desc");
 
   return (
     <div>
@@ -2242,7 +2411,9 @@ function Library({ books,setBooks,borrows,setBorrows,students,users,curUser,noti
             </Modal>
           )}
           <Table cols={["Title","Author","ISBN","Category","Total","Available","Actions"]}
-            rows={filtered.map(b=>(
+            colKeys={["title","author","isbn","category","copies","available",null]}
+            sortState={booksSort}
+            rows={booksSort.sorted.map(b=>(
               <tr key={b.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
                 <TD bold>{b.title}</TD><TD>{b.author}</TD><TD small color="#6b7280">{b.isbn}</TD>
                 <td style={{ padding:"8px 12px" }}><Badge text={b.category} color="#374151" bg="#f1f5f9"/></td>
@@ -2256,7 +2427,9 @@ function Library({ books,setBooks,borrows,setBorrows,students,users,curUser,noti
 
       {tab==="borrows"&&(
         <Table cols={["Book","Borrower","Type","Borrow Date","Due Date","Status","Action"]}
-          rows={[...borrows].reverse().map(bor=>{
+          colKeys={["bookTitle","borrowerName","borrowerType","borrowDate","dueDate",null,null]}
+          sortState={borrowsSort}
+          rows={borrowsSort.sorted.map(bor=>{
             const bk=books.find(b=>b.id===bor.bookId);
             const brw=bor.borrowerType==="Student"?students.find(s=>s.id===bor.borrowerId):users.find(u=>u.id===bor.borrowerId);
             const od=!bor.returnDate&&bor.dueDate<todayStr();
@@ -2682,18 +2855,27 @@ function Reports({ students,grades,attendance,fees,expenses,school,classes,subje
             <select value={sc} onChange={e=>setSc(e.target.value)} style={{ ...inp,width:160 }}>{classes.map(c=><option key={c}>{c}</option>)}</select>
             <select value={st} onChange={e=>setSt(e.target.value)} style={{ ...inp,width:120 }}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
           </div>
-          <Table cols={["#","Student","Avg Score","Grade","Attendance","Fees Status","Position"]}
-            rows={[...classStu].map(s=>({ ...s,av:avg(sg(s.id,st)),att:attRate(s.id) })).sort((a,b)=>b.av-a.av).map((s,i)=>(
-              <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9",background:i<3?"#fffbeb":"#fff" }}>
-                <TD small color={i<3?"#d97706":"#9ca3af"}>{i+1}{i===0?"🥇":i===1?"🥈":i===2?"🥉":""}</TD>
-                <TD bold>{s.name}</TD>
-                <TD bold color={s.av>=70?"#16a34a":s.av>=50?"#d97706":"#dc2626"}>{s.av?s.av+"%":"No data"}</TD>
-                <td style={{ padding:"8px 12px" }}>{s.av?<Badge text={calcGrade(s.av)} color={gradeColor(calcGrade(s.av))}/>:<span>-</span>}</td>
-                <TD color={s.att>=80?"#16a34a":"#dc2626"} bold>{s.att}%</TD>
-                <td style={{ padding:"8px 12px" }}>{s.fees-s.paid===0?<Badge text="Cleared ✅" color="#166534" bg="#dcfce7"/>:<Badge text={formatGHS(s.fees-s.paid)+" due"} color="#991b1b" bg="#fee2e2"/>}</td>
-                <TD bold>{i+1}</TD>
-              </tr>
-            ))} emptyMsg="No students in this class."/>
+          {(() => {
+            const ranked = [...classStu].map(s=>({ ...s,av:avg(sg(s.id,st)),att:attRate(s.id) })).sort((a,b)=>b.av-a.av)
+              .map((s,i)=>({ ...s, position:i+1 }));
+            const classSort = useSort(ranked, "position");
+            return (
+              <Table cols={["#","Student","Avg Score","Grade","Attendance","Fees Status","Position"]}
+                colKeys={["position","name","av",null,"att",null,"position"]}
+                sortState={classSort}
+                rows={classSort.sorted.map((s)=>{ const i=s.position-1; return (
+                  <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9",background:i<3?"#fffbeb":"#fff" }}>
+                    <TD small color={i<3?"#d97706":"#9ca3af"}>{s.position}{i===0?"🥇":i===1?"🥈":i===2?"🥉":""}</TD>
+                    <TD bold>{s.name}</TD>
+                    <TD bold color={s.av>=70?"#16a34a":s.av>=50?"#d97706":"#dc2626"}>{s.av?s.av+"%":"No data"}</TD>
+                    <td style={{ padding:"8px 12px" }}>{s.av?<Badge text={calcGrade(s.av)} color={gradeColor(calcGrade(s.av))}/>:<span>-</span>}</td>
+                    <TD color={s.att>=80?"#16a34a":"#dc2626"} bold>{s.att}%</TD>
+                    <td style={{ padding:"8px 12px" }}>{s.fees-s.paid===0?<Badge text="Cleared ✅" color="#166534" bg="#dcfce7"/>:<Badge text={formatGHS(s.fees-s.paid)+" due"} color="#991b1b" bg="#fee2e2"/>}</td>
+                    <TD bold>{s.position}</TD>
+                  </tr>
+                );})} emptyMsg="No students in this class."/>
+            );
+          })()}
         </div>
       )}
 
@@ -2866,11 +3048,15 @@ function Archive({ students,setStudents,users,setUsers,notify,addAudit }) {
   const dropped=students.filter(s=>s.status==="dropout");
   const graduated=students.filter(s=>s.status==="graduated");
   const inactive=users.filter(u=>!u.active);
+  const droppedSort = useSort(dropped, "name");
+  const graduatedSort = useSort(graduated, "name");
+  const inactiveSort = useSort(inactive, "name");
 
   const restore=id=>{ setStudents(p=>p.map(s=>s.id===id?{...s,status:"active"}:s)); addAudit(`Restored: ${id}`,"Archive"); notify("Restored to active"); };
   const graduate=id=>{ setStudents(p=>p.map(s=>s.id===id?{...s,status:"graduated"}:s)); addAudit(`Graduated: ${id}`,"Archive"); notify("Marked as graduated"); };
 
   const cols=["ID","Name","Class","Guardian","Phone","Status","Actions"];
+  const colKeys=[null,"name","class","guardian","phone","status",null];
   const rows=(list)=>list.map(s=>(
     <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
       <TD small color="#6b7280">{s.id}</TD><TD bold>{s.name}</TD><TD>{s.class}</TD>
@@ -2887,11 +3073,13 @@ function Archive({ students,setStudents,users,setUsers,notify,addAudit }) {
     <div>
       <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>🗄️ Archive & Records</h2>
       <Tabs tabs={[{key:"dropouts",label:`Dropouts (${dropped.length})`},{key:"graduated",label:`Graduated (${graduated.length})`},{key:"staff",label:`Former Staff (${inactive.length})`}]} active={tab} onChange={setTab}/>
-      {(tab==="dropouts")&&<Table cols={cols} rows={rows(dropped)} emptyMsg="No dropout records."/>}
-      {(tab==="graduated")&&<Table cols={cols} rows={rows(graduated)} emptyMsg="No graduated records."/>}
+      {(tab==="dropouts")&&<Table cols={cols} colKeys={colKeys} sortState={droppedSort} rows={rows(droppedSort.sorted)} emptyMsg="No dropout records."/>}
+      {(tab==="graduated")&&<Table cols={cols} colKeys={colKeys} sortState={graduatedSort} rows={rows(graduatedSort.sorted)} emptyMsg="No graduated records."/>}
       {tab==="staff"&&(
         <Table cols={["ID","Code","Name","Role","Email"]}
-          rows={inactive.map(u=>(
+          colKeys={[null,"code","name","role","email"]}
+          sortState={inactiveSort}
+          rows={inactiveSort.sorted.map(u=>(
             <tr key={u.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
               <TD small color="#6b7280">{u.id}</TD><TD bold color="#6b7280">{u.code}</TD>
               <TD bold>{u.name}</TD><TD>{u.role}</TD><TD small color="#6b7280">{u.email}</TD>
@@ -2905,13 +3093,17 @@ function Archive({ students,setStudents,users,setUsers,notify,addAudit }) {
 // ─── AUDIT LOG ───────────────────────────────────────────────
 function AuditLog({ auditLog,users }) {
   const [search,setSearch]=useState("");
-  const filtered=[...auditLog].reverse().filter(l=>!search||(l.user+l.action+l.section).toLowerCase().includes(search.toLowerCase()));
+  const filtered=[...auditLog].reverse().filter(l=>!search||(l.user+l.action+l.section).toLowerCase().includes(search.toLowerCase()))
+    .map(log=>({ ...log, staffName: users.find(x=>x.code===log.user)?.name, staffRole: users.find(x=>x.code===log.user)?.role }));
+  const sort = useSort(filtered, "timestamp", "desc");
   return (
     <div>
       <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>🔍 Audit Log</h2>
       <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by staff code, action, section..." style={{ ...inp,maxWidth:400,marginBottom:14 }}/>
       <Table cols={["Timestamp","Staff Code","Name","Role","Action","Section"]}
-        rows={filtered.slice(0,100).map(log=>{ const u=users.find(x=>x.code===log.user); return (
+        colKeys={["timestamp","user","staffName","staffRole","action","section"]}
+        sortState={sort}
+        rows={sort.sorted.slice(0,100).map(log=>{ const u=users.find(x=>x.code===log.user); return (
           <tr key={log.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
             <TD small color="#6b7280">{log.timestamp}</TD>
             <TD bold color="#1e40af">{log.user}</TD>
@@ -2983,7 +3175,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   };
 
   const exportData=()=>{
-    const data={ version:"5.2", exportDate:nowStr(),
+    const data={ version:"5.3", exportDate:nowStr(),
       school,users,students,grades,mockExams,attendance,fees,expenses,payroll,books,borrows,
       nurseryLogs,milestones,examSchedule,timetables,auditLog,classes,classLevels,subjects,yearArchive };
     const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
@@ -3141,18 +3333,19 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
           <h3 style={{ margin:"0 0 16px",fontSize:16 }}>Licence</h3>
           <div style={{ background:"#f0f9ff",borderRadius:10,padding:16,fontSize:13,lineHeight:2,marginBottom:16 }}>
             <div><strong>Product:</strong> EduSmart School Manager v5.0</div>
-            <div><strong>Type:</strong> <Badge text={licInfo?.type?.toUpperCase()||"—"} color={licInfo?.type==="trial"?"#92400e":"#166534"} bg={licInfo?.type==="trial"?"#fef3c7":"#dcfce7"}/></div>
+            <div><strong>Type:</strong> <Badge text={licInfo?.type?.toUpperCase()||"—"} color={licInfo?.type==="pro"?"#166534":"#1d4ed8"} bg={licInfo?.type==="pro"?"#dcfce7":"#dbeafe"}/></div>
+            <div><strong>Expiry:</strong> {licInfo?.lifetime ? "Lifetime — never expires" : (licInfo?.expiry || "—")}</div>
             <div><strong>Developer:</strong> Gilbert Oscar Prah</div>
-            <div><strong>Contact:</strong> 0597147460 | aifarms101@gmail.com</div>
+            <div><strong>Contact:</strong> 0597147460 | eagleeyefx1@gmail.com</div>
           </div>
           <h4 style={{ fontSize:14,margin:"0 0 10px" }}>Pricing</h4>
-          {[["Trial (1 Term)","Free","All features, 1 term"],["Basic Annual","GH₵ 1,500/yr","1 school, full access"],["Pro Multi-school","GH₵ 3,500/yr","Multiple branches, priority support"]].map(([n,p,d])=>(
+          {[["Basic","GH₵ 1,500/yr","1 school, full access"],["Pro","GH₵ 3,500/yr","Multiple branches, priority support"]].map(([n,p,d])=>(
             <div key={n} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #f1f5f9",fontSize:13 }}>
               <span><strong>{n}</strong> — {d}</span><span style={{ fontWeight:700,color:"#1e40af" }}>{p}</span>
             </div>
           ))}
           <div style={{ marginTop:14,background:"#fffbeb",borderRadius:8,padding:12,fontSize:12,color:"#92400e" }}>
-            📞 Renew or upgrade: <strong>0597147460</strong> | <strong>aifarms101@gmail.com</strong>
+            📞 Renew or upgrade: <strong>0597147460</strong> | <strong>eagleeyefx1@gmail.com</strong>
           </div>
         </Card>
       )}
