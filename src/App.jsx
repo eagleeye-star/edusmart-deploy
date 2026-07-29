@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useCloudSync } from "./sync/useCloudSync.js";
 
 // ─── LICENCE KEY SCHEME ───────────────────────────────────────
 // Keys are self-validating — they carry their own type and expiry date,
@@ -410,6 +411,13 @@ export default function EduSmart() {
   const [yearArchive, setYearArchive] = useState(persisted?.yearArchive ?? {}); // year -> snapshot, populated at each promotion run
   const [auditLog,   setAuditLog]   = useState(persisted?.auditLog ?? AUDIT_LOG_INITIAL);
 
+  // Cloud sync — a no-op layer when not enabled, so nothing below this
+  // point changes app behavior unless the school has actually turned it on.
+  const cloudSync = useCloudSync({
+    appState: { students, attendance, grades, fees },
+    appSetters: { students: setStudents, attendance: setAttendance, grades: setGrades, fees: setFees },
+  });
+
   // Save everything back to local storage shortly after any change.
   // Debounced so rapid typing doesn't write to disk on every keystroke.
   const saveTimer = useRef(null);
@@ -613,7 +621,8 @@ export default function EduSmart() {
     attendance,setAttendance,fees,setFees,expenses,setExpenses,payroll,setPayroll,books,setBooks,borrows,setBorrows,
     nurseryLogs,setNurseryLogs,milestones,setMilestones,examSchedule,setExamSchedule,timetables,setTimetables,
     auditLog,setAuditLog,curUser,notify,addAudit,absentAlerts,feeAlerts,overdueBooks,noStock,unlockUser,failedLogins,
-    setSchool,licInfo,classes,setClasses,classLevels,setClassLevels,subjects,setSubjects,yearArchive,setYearArchive };
+    setSchool,licInfo,classes,setClasses,classLevels,setClassLevels,subjects,setSubjects,yearArchive,setYearArchive,
+    cloudSync };
 
   return (
     <div style={{ display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',sans-serif",background:"#f1f5f9" }}>
@@ -652,6 +661,18 @@ export default function EduSmart() {
           ))}
         </div>
         <div style={{ padding:12,borderTop:"1px solid #1e293b" }}>
+          {cloudSync?.enabled && (
+            <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:8,fontSize:11 }}>
+              <span style={{
+                width:8,height:8,borderRadius:"50%",display:"inline-block",
+                background:cloudSync.status.phase==="online"?"#22c55e":cloudSync.status.phase==="offline"?"#ef4444":"#f59e0b",
+              }}/>
+              <span style={{ color:"#94a3b8" }}>
+                {cloudSync.status.phase==="online"?"Synced":cloudSync.status.phase==="offline"?"Offline":"Connecting"}
+                {cloudSync.status.pending>0?` · ${cloudSync.status.pending} pending`:""}
+              </span>
+            </div>
+          )}
           <div style={{ fontSize:12,color:"#94a3b8",marginBottom:2 }}>{curUser?.name}</div>
           <div style={{ fontSize:11,color:"#475569",marginBottom:6 }}>{curUser?.role} · {curUser?.code}</div>
           <button onClick={doLogout} style={{ width:"100%",padding:7,background:"#7f1d1d",color:"#fca5a5",border:"none",borderRadius:6,cursor:"pointer",fontSize:12 }}>Logout</button>
@@ -988,7 +1009,7 @@ function TeacherDashboard({ school,students,grades,attendance,examSchedule,mockE
 }
 
 
-function Students({ students,setStudents,notify,addAudit,curUser,classes,classLevels,initialSearch }) {
+function Students({ students,setStudents,notify,addAudit,curUser,classes,classLevels,initialSearch,cloudSync }) {
   const [search,setSearch]=useState(initialSearch||""); const [fc,setFc]=useState(""); const [fs,setFs]=useState("all");
   const [showForm,setShowForm]=useState(false); const [editId,setEditId]=useState(null);
   const blank = { name:"",class:"Class 1A",dob:"",gender:"Male",guardian:"",phone:"",fees:500,paid:0,status:"active",section:"primary",photo:"" };
@@ -1005,8 +1026,17 @@ function Students({ students,setStudents,notify,addAudit,curUser,classes,classLe
   const save = () => {
     if(!form.name||!form.class){ notify("Name and Class required","error"); return; }
     const section = KG_CLASSES.includes(form.class)?"nursery":JHS_CLASSES.includes(form.class)?"jhs":"primary";
-    if(editId){ setStudents(p=>p.map(s=>s.id===editId?{...s,...form,section}:s)); addAudit(`Edited: ${form.name}`,"Students"); notify("Student updated"); }
-    else { setStudents(p=>[...p,{...form,section,id:uid("STU")}]); addAudit(`Added: ${form.name}`,"Students"); notify("Student added"); }
+    if(editId){
+      const updated = {...students.find(s=>s.id===editId),...form,section};
+      setStudents(p=>p.map(s=>s.id===editId?updated:s));
+      cloudSync?.writeThrough("students", updated);
+      addAudit(`Edited: ${form.name}`,"Students"); notify("Student updated");
+    } else {
+      const newStudent = {...form,section,id:uid("STU")};
+      setStudents(p=>[...p,newStudent]);
+      cloudSync?.writeThrough("students", newStudent);
+      addAudit(`Added: ${form.name}`,"Students"); notify("Student added");
+    }
     setShowForm(false); setEditId(null); setForm(blank);
   };
 
@@ -1344,7 +1374,7 @@ function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser,classes,
 }
 
 // ─── GRADES ──────────────────────────────────────────────────
-function Grades({ grades,setGrades,students,curUser,notify,addAudit,classes,subjects }) {
+function Grades({ grades,setGrades,students,curUser,notify,addAudit,classes,subjects,cloudSync }) {
   const isTeacher=curUser?.role==="Teacher"; const myClass=isTeacher?curUser?.classAssigned:null;
   const [fc,setFc]=useState(myClass||""); const [fsub,setFsub]=useState(""); const [fterm,setFterm]=useState("");
   const [showForm,setShowForm]=useState(false); const [editId,setEditId]=useState(null);
@@ -1365,8 +1395,17 @@ function Grades({ grades,setGrades,students,curUser,notify,addAudit,classes,subj
     if(+form.ca<0||+form.ca>30){ notify("CA must be 0–30","error"); return; }
     if(+form.exam<0||+form.exam>70){ notify("Exam must be 0–70","error"); return; }
     const score=totalScore(form.ca,form.exam); const grade=calcGrade(score);
-    if(editId){ setGrades(p=>p.map(g=>g.id===editId?{...g,...form,ca:+form.ca,exam:+form.exam,score,grade,enteredBy:curUser.code,date:todayStr()}:g)); addAudit(`Edited grade`,"Grades"); notify("Grade updated"); }
-    else { setGrades(p=>[...p,{id:uid("GRD"),...form,ca:+form.ca,exam:+form.exam,score,grade,enteredBy:curUser.code,date:todayStr()}]); addAudit(`Grade entered: ${form.subject}`,"Grades"); notify("Grade saved"); }
+    if(editId){
+      const updated = {...grades.find(g=>g.id===editId),...form,ca:+form.ca,exam:+form.exam,score,grade,enteredBy:curUser.code,date:todayStr()};
+      setGrades(p=>p.map(g=>g.id===editId?updated:g));
+      cloudSync?.writeThrough("grades", updated);
+      addAudit(`Edited grade`,"Grades"); notify("Grade updated");
+    } else {
+      const newGrade = {id:uid("GRD"),...form,ca:+form.ca,exam:+form.exam,score,grade,enteredBy:curUser.code,date:todayStr()};
+      setGrades(p=>[...p,newGrade]);
+      cloudSync?.writeThrough("grades", newGrade);
+      addAudit(`Grade entered: ${form.subject}`,"Grades"); notify("Grade saved");
+    }
     setShowForm(false); setEditId(null); setForm(blank);
   };
 
@@ -1876,7 +1915,7 @@ function YearHistory({ yearArchive }) {
 }
 
 // ─── ATTENDANCE ──────────────────────────────────────────────
-function Attendance({ attendance,setAttendance,students,curUser,notify,addAudit,classes }) {
+function Attendance({ attendance,setAttendance,students,curUser,notify,addAudit,classes,cloudSync }) {
   const isTeacher=curUser?.role==="Teacher"; const myClass=isTeacher?curUser?.classAssigned:null;
   const [date,setDate]=useState(todayStr()); const [selClass,setSelClass]=useState(myClass||classes[5]);
   const [view,setView]=useState("mark");
@@ -1887,8 +1926,15 @@ function Attendance({ attendance,setAttendance,students,curUser,notify,addAudit,
 
   const mark=(sid,status)=>{
     const ex=attendance.find(a=>a.date===date&&a.class===selClass&&a.studentId===sid);
-    if(ex){ setAttendance(p=>p.map(a=>a.id===ex.id?{...a,status,enteredBy:curUser.code}:a)); }
-    else { setAttendance(p=>[...p,{id:uid("ATT"),studentId:sid,class:selClass,date,status,enteredBy:curUser.code}]); }
+    if(ex){
+      const updated = {...ex,status,enteredBy:curUser.code};
+      setAttendance(p=>p.map(a=>a.id===ex.id?updated:a));
+      cloudSync?.writeThrough("attendance", updated);
+    } else {
+      const newRecord = {id:uid("ATT"),studentId:sid,class:selClass,date,status,enteredBy:curUser.code};
+      setAttendance(p=>[...p,newRecord]);
+      cloudSync?.writeThrough("attendance", newRecord);
+    }
   };
 
   const markAll=st=>{ classStu.forEach(s=>mark(s.id,st)); notify(`All marked ${st}`); };
@@ -1993,7 +2039,7 @@ function Attendance({ attendance,setAttendance,students,curUser,notify,addAudit,
 }
 
 // ─── FINANCE ─────────────────────────────────────────────────
-function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school,curUser,notify,addAudit }) {
+function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school,curUser,notify,addAudit,cloudSync }) {
   const [tab,setTab]=useState("fees");
   const [receipt,setReceipt]=useState(null);
   const [showFee,setShowFee]=useState(false); const [showExp,setShowExp]=useState(false);
@@ -2011,7 +2057,12 @@ function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school
       balance:(+feeForm.amount||+feeForm.paid)-(+feeForm.paid),term:feeForm.term,year:feeForm.year,
       receiptNo:`RCP${Date.now().toString().slice(-5)}`,date:todayStr(),enteredBy:curUser.code };
     setFees(p=>[...p,rec]);
-    setStudents&&setStudents(p=>p.map(s=>s.id===feeForm.studentId?{...s,paid:s.paid+(+feeForm.paid)}:s));
+    cloudSync?.writeThrough("fees", rec);
+    if (stu) {
+      const updatedStudent = {...stu, paid: stu.paid+(+feeForm.paid)};
+      setStudents&&setStudents(p=>p.map(s=>s.id===feeForm.studentId?updatedStudent:s));
+      cloudSync?.writeThrough("students", updatedStudent);
+    }
     addAudit(`Fee: ${stu?.name} ${formatGHS(+feeForm.paid)}`,"Finance");
     setReceipt({...rec,studentName:stu?.name,studentClass:stu?.class,guardian:stu?.guardian});
     setShowFee(false); setFeeForm({studentId:"",amount:"",paid:"",term:"Term 2",year:"2024/2025"}); notify("Payment recorded ✅");
@@ -3123,15 +3174,50 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   fees,setFees,expenses,setExpenses,payroll,setPayroll,books,setBooks,borrows,setBorrows,
   nurseryLogs,setNurseryLogs,milestones,setMilestones,examSchedule,setExamSchedule,
   timetables,setTimetables,auditLog,setAuditLog,
-  classes,setClasses,classLevels,setClassLevels,subjects,setSubjects,yearArchive,setYearArchive }) {
+  classes,setClasses,classLevels,setClassLevels,subjects,setSubjects,yearArchive,setYearArchive,
+  cloudSync }) {
   const [form,setForm]=useState({...school}); const [tab,setTab]=useState("school");
   const [resetId,setResetId]=useState(""); const [newPin,setNewPin]=useState("");
   const [importFile,setImportFile]=useState(null); const [importErr,setImportErr]=useState("");
   const fileInputRef = useRef(null);
   const [newClassName,setNewClassName]=useState(""); const [newClassLevel,setNewClassLevel]=useState("Primary");
   const [newSubject,setNewSubject]=useState("");
+  const [cloudMode,setCloudMode]=useState("new"); // "new" | "link"
+  const [cloudForm,setCloudForm]=useState({ schoolName:school.name||"", deviceEmail:"", devicePassword:"" });
+  const [cloudBusy,setCloudBusy]=useState(false);
+  const [cloudErr,setCloudErr]=useState("");
+  const [migrationResult,setMigrationResult]=useState(null);
 
   const save=()=>{ setSchool({...form}); addAudit("Updated school settings","Settings"); notify("Settings saved ✅"); };
+
+  const handleEnableCloud=async()=>{
+    if(!cloudForm.deviceEmail||!cloudForm.devicePassword){ setCloudErr("Enter a device email and password."); return; }
+    if(cloudMode==="new"&&!cloudForm.schoolName.trim()){ setCloudErr("Enter a school name."); return; }
+    setCloudBusy(true); setCloudErr("");
+    try{
+      if(cloudMode==="new"){
+        const results = await cloudSync.enableNewSchool({ schoolName:cloudForm.schoolName.trim(), deviceEmail:cloudForm.deviceEmail.trim(), devicePassword:cloudForm.devicePassword });
+        setMigrationResult(results);
+        addAudit("Cloud sync enabled — new school registered and existing data migrated","Settings");
+        notify("Cloud sync enabled ✅");
+      } else {
+        await cloudSync.linkToExistingSchool({ deviceEmail:cloudForm.deviceEmail.trim(), devicePassword:cloudForm.devicePassword });
+        addAudit("Cloud sync enabled — linked to existing school","Settings");
+        notify("Linked to existing school ✅");
+      }
+    } catch(e){
+      setCloudErr(e?.message || "Something went wrong connecting to the cloud.");
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const handleDisableCloud=()=>{
+    if(!confirm("Turn off cloud sync on this device? Local data stays exactly as it is — this only stops syncing to/from the cloud.")) return;
+    cloudSync.disable();
+    notify("Cloud sync turned off for this device");
+  };
+
 
   const resetPin=()=>{
     if(!resetId||!newPin||newPin.length!==4){ notify("Select staff and enter 4-digit PIN","error"); return; }
@@ -3228,7 +3314,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   return (
     <div>
       <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>⚙️ Settings</h2>
-      <Tabs tabs={[{key:"school",label:"🏫 School Profile"},{key:"classes",label:"🏷️ Classes & Subjects"},{key:"security",label:"🔐 Security"},{key:"data",label:"💾 Data & Backup"},{key:"licence",label:"🔑 Licence"}]} active={tab} onChange={setTab}/>
+      <Tabs tabs={[{key:"school",label:"🏫 School Profile"},{key:"classes",label:"🏷️ Classes & Subjects"},{key:"security",label:"🔐 Security"},{key:"data",label:"💾 Data & Backup"},{key:"cloud",label:"☁️ Cloud Sync"},{key:"licence",label:"🔑 Licence"}]} active={tab} onChange={setTab}/>
 
       {tab==="school"&&(
         <Card style={{ padding:24,maxWidth:580 }}>
@@ -3324,6 +3410,66 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
               <div>{importFile.students?.length||0} students, {importFile.users?.length||0} staff, {importFile.grades?.length||0} grade records, {importFile.fees?.length||0} fee records</div>
               <button onClick={confirmRestore} style={{ ...btnP,marginTop:10,background:"#dc2626" }}>⚠️ Confirm Restore (Overwrites Current Data)</button>
             </div>
+          )}
+        </Card>
+      )}
+
+      {tab==="cloud"&&(
+        <Card style={{ padding:24,maxWidth:560 }}>
+          <h3 style={{ margin:"0 0 6px",fontSize:16 }}>☁️ Cloud Sync</h3>
+          <p style={{ fontSize:12,color:"#64748b",marginBottom:18 }}>
+            Lets multiple devices (the office PC, a teacher's laptop) share the same live student, attendance, grade, and fee data — working offline stays fully supported, changes just sync automatically once a connection is available.
+          </p>
+
+          {!cloudSync?.enabled ? (
+            <>
+              <div style={{ display:"flex",gap:8,marginBottom:16 }}>
+                <button onClick={()=>setCloudMode("new")} style={{ ...btnSm,flex:1,padding:"10px",background:cloudMode==="new"?"#1e40af":"#f1f5f9",color:cloudMode==="new"?"#fff":"#374151" }}>Set Up New (first device)</button>
+                <button onClick={()=>setCloudMode("link")} style={{ ...btnSm,flex:1,padding:"10px",background:cloudMode==="link"?"#1e40af":"#f1f5f9",color:cloudMode==="link"?"#fff":"#374151" }}>Link to Existing School</button>
+              </div>
+
+              {cloudMode==="new" && (
+                <div style={{ background:"#f0f9ff",borderRadius:8,padding:12,fontSize:12,color:"#0369a1",marginBottom:14 }}>
+                  This is the first device connecting this school to the cloud. Your existing local students, attendance, grades, and fees will be uploaded automatically as the starting dataset — nothing is deleted or changed locally.
+                </div>
+              )}
+              {cloudMode==="link" && (
+                <div style={{ background:"#f0f9ff",borderRadius:8,padding:12,fontSize:12,color:"#0369a1",marginBottom:14 }}>
+                  Use this on a second device (e.g. a teacher's laptop) once another device has already set up cloud sync for this school. Enter the SAME device email and password used on that first device.
+                </div>
+              )}
+
+              {cloudMode==="new" && (
+                <Row label="School Name"><input value={cloudForm.schoolName} onChange={e=>setCloudForm(p=>({...p,schoolName:e.target.value}))} style={inp}/></Row>
+              )}
+              <Row label="Device Email"><input value={cloudForm.deviceEmail} onChange={e=>setCloudForm(p=>({...p,deviceEmail:e.target.value}))} style={inp} placeholder="e.g. eikwe.device@gmail.com"/></Row>
+              <Row label="Device Password"><input type="password" value={cloudForm.devicePassword} onChange={e=>setCloudForm(p=>({...p,devicePassword:e.target.value}))} style={inp}/></Row>
+              {cloudErr&&<p style={{ color:"#dc2626",fontSize:13,marginBottom:10 }}>{cloudErr}</p>}
+              <button onClick={handleEnableCloud} disabled={cloudBusy} style={{ ...btnP,width:"100%",opacity:cloudBusy?0.6:1 }}>
+                {cloudBusy?"Connecting...":(cloudMode==="new"?"Enable Cloud Sync":"Link This Device")}
+              </button>
+
+              {migrationResult&&(
+                <div style={{ background:"#f0fdf4",borderRadius:8,padding:12,marginTop:14,fontSize:12,color:"#166534" }}>
+                  <strong>Migration complete:</strong> {migrationResult.students} students, {migrationResult.attendance} attendance records, {migrationResult.grades} grades, {migrationResult.fees} fee records uploaded to the cloud.
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:16 }}>
+                <Badge
+                  text={cloudSync.status.phase==="online"?"🟢 Online":cloudSync.status.phase==="offline"?"🔴 Offline":"🟡 Connecting"}
+                  color={cloudSync.status.phase==="online"?"#166534":cloudSync.status.phase==="offline"?"#991b1b":"#92400e"}
+                  bg={cloudSync.status.phase==="online"?"#dcfce7":cloudSync.status.phase==="offline"?"#fee2e2":"#fef3c7"}
+                />
+                {cloudSync.status.pending>0 && <Badge text={`${cloudSync.status.pending} pending sync`} color="#92400e" bg="#fef3c7"/>}
+              </div>
+              <p style={{ fontSize:13,color:"#374151",marginBottom:16 }}>
+                This device is connected to cloud sync. Students, Attendance, Grades, and Fees stay in sync with every other device linked to this school — offline changes queue automatically and upload once a connection returns.
+              </p>
+              <button onClick={handleDisableCloud} style={{ ...btnS,background:"#fee2e2",color:"#991b1b" }}>Turn Off Cloud Sync on This Device</button>
+            </>
           )}
         </Card>
       )}
