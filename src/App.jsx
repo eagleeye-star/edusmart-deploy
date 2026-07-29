@@ -382,13 +382,15 @@ export default function EduSmart() {
   const [selUser,   setSelUser]   = useState("");
   const [pin,       setPin]       = useState("");
   const [authErr,   setAuthErr]   = useState("");
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryKey, setRecoveryKey] = useState("");
   const [section,   setSection]   = useState("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [quickQuery, setQuickQuery] = useState("");
   const [jumpSearch, setJumpSearch] = useState("");
   const [notif,     setNotif]     = useState(null);
   const [lastActivity, setLastActivity] = useState(Date.now());
-  const [failedLogins, setFailedLogins] = useState({});
+  const [failedLogins, setFailedLogins] = useState(persisted?.failedLogins ?? {});
 
   const [school,     setSchool]     = useState(persisted?.school ?? INITIAL_SCHOOL);
   const [users,      setUsers]      = useState(persisted?.users ?? INITIAL_USERS);
@@ -427,14 +429,14 @@ export default function EduSmart() {
       try {
         const blob = { licenced, licInfo, school, users, students, grades, mockExams, attendance, fees,
           expenses, payroll, books, borrows, nurseryLogs, milestones, examSchedule, timetables,
-          classes, classLevels, subjects, yearArchive, auditLog };
+          classes, classLevels, subjects, yearArchive, auditLog, failedLogins };
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(blob));
       } catch (e) { /* storage full or unavailable — data stays in memory for this session */ }
     }, 500);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [licenced, licInfo, school, users, students, grades, mockExams, attendance, fees, expenses,
       payroll, books, borrows, nurseryLogs, milestones, examSchedule, timetables,
-      classes, classLevels, subjects, yearArchive, auditLog]);
+      classes, classLevels, subjects, yearArchive, auditLog, failedLogins]);
 
   const notify = (msg, type="success") => { setNotif({msg,type}); setTimeout(()=>setNotif(null),3500); };
 
@@ -462,18 +464,35 @@ export default function EduSmart() {
     return ()=>{ window.removeEventListener("mousemove",track); window.removeEventListener("keydown",track); clearInterval(check); };
   },[loggedIn,lastActivity]);
 
+  // ─── LOCKOUT: 15-minute auto-expiry, so a single-admin school can
+  // never be locked out permanently, while still meaning something —
+  // unlike a purely in-memory lockout, this survives an app restart,
+  // so restarting can't be used to bypass PIN guessing attempts.
+  const LOCKOUT_DURATION_MS = 15 * 60 * 1000;
+  function isLocked(userId) {
+    const rec = failedLogins[userId];
+    if (!rec || !rec.lockedAt) return false;
+    return (Date.now() - rec.lockedAt) < LOCKOUT_DURATION_MS;
+  }
+  function lockoutRemaining(userId) {
+    const rec = failedLogins[userId];
+    if (!rec || !rec.lockedAt) return 0;
+    return Math.max(0, Math.ceil((LOCKOUT_DURATION_MS - (Date.now()-rec.lockedAt))/60000));
+  }
+
   function doLogin() {
     const u = users.find(x=>x.id===selUser && x.active);
     if (!u) { setAuthErr("User not found or inactive."); return; }
-    const fails = failedLogins[selUser]||0;
-    if (fails >= 3) { setAuthErr("Account locked after 3 failed attempts. Contact Admin."); return; }
+    if (isLocked(selUser)) { setAuthErr(`Account locked. Try again in ${lockoutRemaining(selUser)} minute(s), or use the recovery option below.`); return; }
+    const fails = failedLogins[selUser]?.count||0;
     if (u.pin !== pin) {
       const newFails = fails+1;
-      setFailedLogins(p=>({...p,[selUser]:newFails}));
-      setAuthErr(newFails>=3?"Account locked. Contact Admin to unlock.":`Wrong PIN. ${3-newFails} attempt(s) remaining.`);
+      const locked = newFails>=3;
+      setFailedLogins(p=>({...p,[selUser]:{ count:newFails, lockedAt: locked?Date.now():null }}));
+      setAuthErr(locked?`Account locked for 15 minutes after 3 failed attempts.`:`Wrong PIN. ${3-newFails} attempt(s) remaining.`);
       return;
     }
-    setFailedLogins(p=>({...p,[selUser]:0}));
+    setFailedLogins(p=>({...p,[selUser]:{count:0,lockedAt:null}}));
     setCurUser(u); setLoggedIn(true); setPin(""); setAuthErr("");
     const secs = ROLE_ACCESS[u.role]||[];
     setSection(secs[0]||"dashboard");
@@ -481,7 +500,17 @@ export default function EduSmart() {
 
   function doLogout() { setLoggedIn(false); setCurUser(null); setPin(""); setSelUser(""); }
 
-  const unlockUser = (uid2) => { setFailedLogins(p=>({...p,[uid2]:0})); notify("Account unlocked"); };
+  const unlockUser = (uid2) => { setFailedLogins(p=>({...p,[uid2]:{count:0,lockedAt:null}})); notify("Account unlocked"); };
+
+  // Last-resort recovery when there's no other Admin available to click
+  // "Unlock" in Staff — only the paying school actually has this key,
+  // so it's a reasonable proof that whoever's asking is legitimate.
+  const recoverWithLicenceKey = (enteredKey) => {
+    if (enteredKey.trim().toUpperCase() !== licInfo?.key) { return false; }
+    setFailedLogins({});
+    notify("All account lockouts cleared using your licence key ✅");
+    return true;
+  };
 
   // ─── LICENCE SCREEN ───
   if (!licenced) return (
@@ -547,6 +576,25 @@ export default function EduSmart() {
         </Row>
         {authErr&&<p style={{ color:"#dc2626",fontSize:13,marginBottom:10 }}>{authErr}</p>}
         <button onClick={doLogin} style={{ ...btnP,width:"100%",padding:12,fontSize:15 }}>Login</button>
+
+        {selUser && isLocked(selUser) && (
+          <div style={{ marginTop:14,paddingTop:14,borderTop:"1px solid #e5e7eb" }}>
+            {!showRecovery ? (
+              <button onClick={()=>setShowRecovery(true)} style={{ background:"none",border:"none",color:"#1e40af",fontSize:12,cursor:"pointer",textDecoration:"underline",padding:0 }}>
+                No other Admin available to unlock this account?
+              </button>
+            ) : (
+              <>
+                <p style={{ fontSize:12,color:"#64748b",marginBottom:8 }}>Enter your EduSmart licence key to clear all account lockouts. Only the school that purchased this licence has this key.</p>
+                <input value={recoveryKey} onChange={e=>setRecoveryKey(e.target.value.toUpperCase())} placeholder="EDU-X-XXXXX-XXXXX-XXXXX" style={{ ...inp,marginBottom:8 }}/>
+                <button onClick={()=>{
+                  if(recoverWithLicenceKey(recoveryKey)){ setShowRecovery(false); setRecoveryKey(""); setAuthErr(""); }
+                  else notify("That licence key doesn't match — lockouts were not cleared.","error");
+                }} style={{ ...btnS,width:"100%" }}>Clear All Lockouts</button>
+              </>
+            )}
+          </div>
+        )}
         <p style={{ textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:10 }}>EduSmart v5.0 | {school.name}</p>
       </div>
     </div>
@@ -1351,7 +1399,7 @@ function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser,classes,
         colKeys={[null,"code","name","role","classAssigned","email","active",null,null]}
         sortState={sort}
         rows={sort.sorted.map(u=>{
-          const locked=(failedLogins[u.id]||0)>=3;
+          const locked=failedLogins[u.id]?.lockedAt && (Date.now()-failedLogins[u.id].lockedAt)<15*60*1000;
           return (
             <tr key={u.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
               <TD small color="#6b7280">{u.id}</TD>
