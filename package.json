@@ -1,1 +1,59 @@
-{"name":"edusmart","version":"1.0.0","private":true,"scripts":{"dev":"vite","build":"vite build","preview":"vite preview"},"dependencies":{"react":"^18.3.1","react-dom":"^18.3.1"},"devDependencies":{"@vitejs/plugin-react":"^4.3.1","vite":"^5.4.2"}}
+{
+  "name": "edusmart-school-manager",
+  "productName": "EduSmart School Manager",
+  "version": "5.4.0",
+  "description": "EduSmart School Manager for Ghanaian Basic Schools",
+  "author": "Gilbert Oscar Prah",
+  "main": "electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron:dev": "vite build && electron .",
+    "dist": "vite build && electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "playwright": "^1.62.0",
+    "jsdom": "^30.0.0",
+    "vite": "^6.0.5"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@supabase/supabase-js": "^2.45.0"
+  },
+  "build": {
+    "appId": "com.eagleeye.edusmart",
+    "productName": "EduSmart School Manager",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "EduSmart"
+    }
+  }
+}
