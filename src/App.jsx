@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "5.5.2";
+const APP_VERSION = "5.5.3";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -3676,6 +3676,20 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
               <p style={{ fontSize:13,color:"#374151",marginBottom:16 }}>
                 This device is connected to cloud sync. Students, Staff, Attendance, Grades, and Fees stay in sync with every other device linked to this school — offline changes queue automatically and upload once a connection returns.
               </p>
+
+              {cloudSync.status.stuck?.length>0 && (
+                <div style={{ background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:14,marginBottom:16 }}>
+                  <div style={{ fontSize:13,fontWeight:600,color:"#991b1b",marginBottom:8 }}>⚠️ {cloudSync.status.stuck.length} record(s) failing to sync — here's why:</div>
+                  <div style={{ maxHeight:200,overflowY:"auto" }}>
+                    {cloudSync.status.stuck.slice(0,10).map((s,i)=>(
+                      <div key={i} style={{ fontSize:11,color:"#7f1d1d",padding:"4px 0",borderBottom:"1px solid #fee2e2" }}>
+                        <strong>{s.table}</strong>{s.name?` (${s.name})`:""} — tried {s.attempts}× — {s.lastError||"unknown error"}
+                      </div>
+                    ))}
+                  </div>
+                  <p style={{ fontSize:11,color:"#7f1d1d",marginTop:8 }}>This is exactly the error the server sent back — worth copying and sharing if you need help resolving it.</p>
+                </div>
+              )}
 
               <div style={{ background:"#f8fafc",borderRadius:8,padding:14,marginBottom:16 }}>
                 <div style={{ fontSize:12,fontWeight:600,color:"#374151",marginBottom:8 }}>Connect Code for adding another device</div>

@@ -27,6 +27,7 @@ const FLUSH_INTERVAL_MS = 8000;
 
 export function useCloudSync({ appState, appSetters }) {
   const [enabled, setEnabled] = useState(() => isCloudSyncEnabled(window.localStorage));
+  const skipNextInitialPull = useRef(false);
   const [status, setStatus] = useState({ phase: "disabled", pending: 0, lastError: null });
 
   const engineRef = useRef(null);
@@ -81,16 +82,22 @@ export function useCloudSync({ appState, appSetters }) {
         storage: window.localStorage,
         remote: remoteRef.current,
         schoolId: link.schoolId,
-        onChange: () => setStatus(s => ({ ...s, pending: engine.pendingCount() })),
+        onChange: () => setStatus(s => ({ ...s, pending: engine.pendingCount(), stuck: engine.getStuckEntries() })),
       });
       engineRef.current = engine;
 
       for (const table of SYNCED_TABLES) {
+        // If joinWithConnectCode just populated this device from scratch,
+        // don't fetch every table again immediately after — that was
+        // doubling the number of pull requests on every new device join
+        // for no benefit (the data's already there).
+        if (skipNextInitialPull.current) continue;
         try {
           const rows = await remoteRef.current.fetchAll(table);
           if (!cancelled) mergeIntoAppState(table, rows);
         } catch (e) { /* offline on first launch — local data still shows via existing state */ }
       }
+      skipNextInitialPull.current = false;
       if (cancelled) return;
 
       unsubs = SYNCED_TABLES.map(table =>
@@ -100,7 +107,7 @@ export function useCloudSync({ appState, appSetters }) {
       const tick = async () => {
         const reachable = await engine.isReachable();
         if (reachable) await engine.flush();
-        if (!cancelled) setStatus({ phase: reachable ? "online" : "offline", pending: engine.pendingCount(), lastError: null });
+        if (!cancelled) setStatus({ phase: reachable ? "online" : "offline", pending: engine.pendingCount(), stuck: engine.getStuckEntries(), lastError: null });
       };
       await tick();
       interval = setInterval(tick, FLUSH_INTERVAL_MS);
@@ -184,6 +191,7 @@ export function useCloudSync({ appState, appSetters }) {
     if (pulled.attendance?.length) appSetters.attendance(pulled.attendance.map(s => ({ ...s, id: s.client_id })));
     if (pulled.grades?.length) appSetters.grades(pulled.grades.map(s => ({ ...s, id: s.client_id })));
     if (pulled.fees?.length) appSetters.fees(pulled.fees.map(s => ({ ...s, id: s.client_id })));
+    skipNextInitialPull.current = true;
     setEnabled(true);
     return pulled;
   }, [appSetters]);

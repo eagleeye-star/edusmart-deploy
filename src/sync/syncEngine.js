@@ -231,5 +231,15 @@ export function createSyncEngine({ storage, remote, schoolId, onChange, autoFlus
     return { pending: queue.length, erroring: queue.filter(q => q.attempts > 0).length };
   }
 
-  return { getAll, upsertLocal, upsertLocalBatch, flush, pullRemote, subscribeRealtime, pendingCount, status, isReachable };
+  // Surfaces the ACTUAL error behind a stuck sync — before this, the
+  // only visible signal was a pending count that never dropped, with
+  // no way to see why. This is what a genuinely stuck record looks
+  // like: attempts > 0, and whatever the last upsert attempt threw.
+  function getStuckEntries() {
+    return loadQueue()
+      .filter(q => q.attempts > 0)
+      .map(q => ({ table: q.table, clientId: q.clientId, attempts: q.attempts, lastError: q.lastError, name: q.payload?.name }));
+  }
+
+  return { getAll, upsertLocal, upsertLocalBatch, flush, pullRemote, subscribeRealtime, pendingCount, status, isReachable, getStuckEntries };
 }
