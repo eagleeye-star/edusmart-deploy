@@ -116,8 +116,14 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
       if (error) throw error;
     },
 
-    async verifyPin(staffId, pin) {
-      const { data, error } = await supabaseClient.rpc("verify_staff_pin", { p_staff_id: staffId, p_pin: pin });
+    // Takes a client_id (which is what the app's own local "id" field
+    // actually is, everywhere — not the server's internal uuid), and
+    // calls the RPC variant that looks staff up that way. Scoped
+    // safely by the caller's own linked school via RLS on the server
+    // side (verified directly: two different schools sharing the same
+    // client_id string can never verify each other's PINs).
+    async verifyPin(clientId, pin) {
+      const { data, error } = await supabaseClient.rpc("verify_staff_pin_by_client_id", { p_client_id: clientId, p_pin: pin });
       if (error) throw error;
       return data === true;
     },
