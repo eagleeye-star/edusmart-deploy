@@ -260,9 +260,35 @@ export function useCloudSync({ appState, appSetters }) {
     return result;
   }, []);
 
+  // Renewing the licence on one device pushes it here; called from the
+  // app right after a successful local activation. A no-op when cloud
+  // sync isn't enabled — renewal still works locally-only exactly as
+  // before in that case.
+  const pushLicenceToCloud = useCallback(async (licInfo) => {
+    if (!enabled) return;
+    const link = getDeviceLink(window.localStorage);
+    if (!link) return;
+    try { await remoteRef.current.pushLicenceInfo(link.schoolId, licInfo); }
+    catch (e) { /* non-fatal — the device's own local activation already succeeded */ }
+  }, [enabled]);
+
+  // Called periodically by the app (see the licence-check effect in
+  // App) so a device sitting on an expired-locally licence picks up a
+  // renewal pushed from elsewhere without anyone re-typing the key on
+  // every device individually. Returns the raw cloud value —
+  // validating it against the app's own key-checksum logic before
+  // trusting it is the caller's responsibility, kept there since that
+  // validation logic already lives in the main app file.
+  const checkForLicenceUpdate = useCallback(async () => {
+    if (!enabled) return null;
+    try { return await remoteRef.current.fetchLicenceInfo(); }
+    catch (e) { return null; }
+  }, [enabled]);
+
   return {
     enabled, status, writeThrough, writeThroughBulk, verifyPin,
     enableNewSchool, joinWithConnectCode, linkToExistingSchool,
+    pushLicenceToCloud, checkForLicenceUpdate,
     getConnectCode, disable, syncNow,
   };
 }

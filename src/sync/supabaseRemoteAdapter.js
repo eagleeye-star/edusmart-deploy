@@ -165,6 +165,27 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
       if (error) throw error;
     },
 
+    // Renewing on one device pushes the new licence here; every other
+    // device linked to the same school picks it up automatically via
+    // fetchLicenceInfo (called periodically — see useCloudSync). Kept
+    // separate from updateSchoolInfo since licence data is a distinct
+    // concern from the school's own profile fields.
+    async pushLicenceInfo(schoolId, licInfo) {
+      const { error } = await supabaseClient.from("schools").update({
+        licence_type: licInfo.type,
+        licence_expiry: licInfo.lifetime ? null : licInfo.expiry,
+        licence_key: licInfo.key,
+      }).eq("id", schoolId);
+      if (error) throw error;
+    },
+
+    async fetchLicenceInfo() {
+      const { data, error } = await supabaseClient.from("schools").select("licence_type, licence_expiry, licence_key").single();
+      if (error) throw error;
+      if (!data.licence_key) return null; // nobody has pushed a licence to this school yet
+      return { type: data.licence_type, expiry: data.licence_expiry, lifetime: !data.licence_expiry, key: data.licence_key };
+    },
+
     subscribe(table, onRow) {
       const channel = supabaseClient
         .channel(`${table}-sync-${Math.random().toString(36).slice(2)}`)

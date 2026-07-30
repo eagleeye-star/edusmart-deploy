@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "5.5.8";
+const APP_VERSION = "5.6.0";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -461,6 +461,30 @@ export default function EduSmart() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Picks up a licence renewed on a DIFFERENT device automatically —
+  // runs even while this device is sitting on the "licence expired"
+  // gate screen, since cloudSync itself doesn't depend on being past
+  // that gate. Deliberately re-validates the fetched key with the same
+  // checksum logic used for manual entry before ever trusting it,
+  // rather than assuming anything pulled from the cloud is automatically
+  // safe to apply.
+  useEffect(() => {
+    if (!cloudSync?.enabled) return;
+    const check = async () => {
+      const cloudLic = await cloudSync.checkForLicenceUpdate();
+      if (!cloudLic || cloudLic.key === licInfo?.key) return; // nothing new
+      const validated = parseLicenceKey(cloudLic.key);
+      if (!validated) return; // don't trust an unparseable key, even from our own cloud
+      if (!validated.lifetime && validated.expiry && validated.expiry < new Date()) return; // don't auto-apply an already-expired key either
+      setLicInfo({ type:validated.type, expiry:validated.lifetime?null:validated.expiry?.toISOString().split("T")[0], lifetime:validated.lifetime, key:cloudLic.key });
+      setLicenced(true);
+      setLicErr("");
+    };
+    check();
+    const interval = setInterval(check, 15000);
+    return () => clearInterval(interval);
+  }, [cloudSync?.enabled, licInfo?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const addAudit = useCallback((action, sec) => {
     if (!curUser) return;
     setAuditLog(p=>[...p,{ id:uid("AUD"), user:curUser.code, action, section:sec, timestamp:nowStr() }]);
@@ -568,8 +592,13 @@ export default function EduSmart() {
     const k = parseLicenceKey(licKey);
     if (!k) { setLicErr("Invalid licence key. Please check it and try again, or contact EduSmart support."); return; }
     if (!k.lifetime && k.expiry && k.expiry < new Date()) { setLicErr("This licence key has expired. Please renew."); return; }
-    setLicInfo({ type:k.type, expiry:k.lifetime?null:k.expiry?.toISOString().split("T")[0], lifetime:k.lifetime, key:licKey.trim().toUpperCase() });
+    const newLicInfo = { type:k.type, expiry:k.lifetime?null:k.expiry?.toISOString().split("T")[0], lifetime:k.lifetime, key:licKey.trim().toUpperCase() };
+    setLicInfo(newLicInfo);
     setLicenced(true); setLicErr("");
+    // Push to the cloud (no-op if cloud sync isn't enabled) so every
+    // other device linked to this school picks up the renewal
+    // automatically instead of needing the key typed in individually.
+    cloudSync?.pushLicenceToCloud(newLicInfo);
   }
 
   // ─── FIRST-RUN SETUP WIZARD ───
