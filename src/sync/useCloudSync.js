@@ -24,6 +24,20 @@ import { generateConnectCode, parseConnectCode } from "./connectCode.js";
 
 const SYNCED_TABLES = ["students", "attendance", "grades", "fees", "staff"];
 const FLUSH_INTERVAL_MS = 8000;
+const JOIN_TIMEOUT_MS = 20000;
+
+// fetch() has no built-in timeout, and neither does supabase-js on top
+// of it — a stalled connection can hang a promise indefinitely rather
+// than failing cleanly. This is what was causing "Connecting..." to
+// never resolve into either success or a visible error. Racing against
+// a timeout guarantees the UI always gets a definite answer within 20
+// seconds, even if the underlying network call is still stuck.
+function withTimeout(promise, ms, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+  ]);
+}
 
 export function useCloudSync({ appState, appSetters }) {
   const [enabled, setEnabled] = useState(() => isCloudSyncEnabled(window.localStorage));
@@ -111,6 +125,16 @@ export function useCloudSync({ appState, appSetters }) {
       };
       await tick();
       interval = setInterval(tick, FLUSH_INTERVAL_MS);
+
+      // Browsers throttle timers in backgrounded tabs, so the 8-second
+      // auto-retry above can't be relied on while a tab is inactive —
+      // "pending" can end up looking stuck simply because nobody was
+      // looking at it. Catching up the moment the tab becomes visible
+      // again means switching back to it is enough, without needing
+      // the manual Sync Now button for this specific case.
+      const onVisible = () => { if (document.visibilityState === "visible") tick(); };
+      document.addEventListener("visibilitychange", onVisible);
+      unsubs.push(() => document.removeEventListener("visibilitychange", onVisible));
     })();
 
     return () => {
@@ -175,10 +199,14 @@ export function useCloudSync({ appState, appSetters }) {
   const joinWithConnectCode = useCallback(async (code) => {
     const decoded = parseConnectCode(code);
     if (!decoded) throw new Error("That doesn't look like a valid Connect Code. Double-check it was copied in full.");
-    const { pulled } = await joinExistingSchoolAndPullData({
-      auth: authRef.current, storage: window.localStorage, remote: remoteRef.current,
-      deviceEmail: decoded.deviceEmail, devicePassword: decoded.devicePassword,
-    });
+    const { pulled } = await withTimeout(
+      joinExistingSchoolAndPullData({
+        auth: authRef.current, storage: window.localStorage, remote: remoteRef.current,
+        deviceEmail: decoded.deviceEmail, devicePassword: decoded.devicePassword,
+      }),
+      JOIN_TIMEOUT_MS,
+      "This is taking too long — check your internet connection and try again. If it keeps happening, the Connect Code or your connection to the cloud may need a closer look."
+    );
     try {
       const schoolInfo = await remoteRef.current.fetchSchoolInfo();
       appSetters.school(prev => ({ ...prev, ...schoolInfo }));
@@ -213,9 +241,28 @@ export function useCloudSync({ appState, appSetters }) {
     setEnabled(false);
   }, []);
 
+  // The manual "Sync Now" button — forces an immediate attempt instead
+  // of waiting for the next automatic 8-second tick, and immediately
+  // refreshes the status so the UI doesn't sit stale even if the tab
+  // was backgrounded (browsers throttle timers in inactive tabs, which
+  // can otherwise leave "pending" looking stuck even when it isn't).
+  const syncNow = useCallback(async () => {
+    if (!engineRef.current) return { pushed: 0, remaining: 0 };
+    setStatus(s => ({ ...s, phase: "connecting" }));
+    const reachable = await engineRef.current.isReachable();
+    const result = reachable ? await engineRef.current.flush() : { pushed: 0, remaining: engineRef.current.pendingCount(), offline: true };
+    setStatus({
+      phase: reachable ? "online" : "offline",
+      pending: engineRef.current.pendingCount(),
+      stuck: engineRef.current.getStuckEntries(),
+      lastError: null,
+    });
+    return result;
+  }, []);
+
   return {
     enabled, status, writeThrough, writeThroughBulk, verifyPin,
     enableNewSchool, joinWithConnectCode, linkToExistingSchool,
-    getConnectCode, disable,
+    getConnectCode, disable, syncNow,
   };
 }

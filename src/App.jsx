@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "5.5.4";
+const APP_VERSION = "5.5.6";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -3352,6 +3352,8 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   const [migrationResult,setMigrationResult]=useState(null);
   const [setupConnectCode,setSetupConnectCode]=useState(null);
   const [codeCopied,setCodeCopied]=useState(false);
+  const [syncingNow,setSyncingNow]=useState(false);
+  const [syncResult,setSyncResult]=useState("");
 
   const save=()=>{ setSchool({...form}); addAudit("Updated school settings","Settings"); notify("Settings saved ✅"); };
 
@@ -3389,6 +3391,19 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
     if(!confirm("Turn off cloud sync on this device? Local data stays exactly as it is — this only stops syncing to/from the cloud.")) return;
     cloudSync.disable();
     notify("Cloud sync turned off for this device");
+  };
+
+  const handleSyncNow=async()=>{
+    setSyncingNow(true); setSyncResult("");
+    try{
+      const result = await cloudSync.syncNow();
+      if(result.offline){ setSyncResult("Still offline — nothing could be sent this time."); }
+      else if(result.pushed>0){ setSyncResult(`✅ Synced ${result.pushed} record(s) just now.`); }
+      else if(result.remaining>0){ setSyncResult(`${result.remaining} record(s) still couldn't sync — check the error details below.`); }
+      else { setSyncResult("Everything is already up to date."); }
+    } catch(e){ setSyncResult("Something went wrong trying to sync — try again in a moment."); }
+    setSyncingNow(false);
+    setTimeout(()=>setSyncResult(""),6000);
   };
 
 
@@ -3665,14 +3680,18 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
             </>
           ) : (
             <>
-              <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:16 }}>
+              <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:16,flexWrap:"wrap" }}>
                 <Badge
                   text={cloudSync.status.phase==="online"?"🟢 Online":cloudSync.status.phase==="offline"?"🔴 Offline":"🟡 Connecting"}
                   color={cloudSync.status.phase==="online"?"#166534":cloudSync.status.phase==="offline"?"#991b1b":"#92400e"}
                   bg={cloudSync.status.phase==="online"?"#dcfce7":cloudSync.status.phase==="offline"?"#fee2e2":"#fef3c7"}
                 />
                 {cloudSync.status.pending>0 && <Badge text={`${cloudSync.status.pending} pending sync`} color="#92400e" bg="#fef3c7"/>}
+                <button onClick={handleSyncNow} disabled={syncingNow} style={{ ...btnSm,padding:"6px 14px",background:"#dbeafe",color:"#1d4ed8",opacity:syncingNow?0.6:1 }}>
+                  {syncingNow?"Syncing...":"🔄 Sync Now"}
+                </button>
               </div>
+              {syncResult && <p style={{ fontSize:12,color:"#64748b",marginBottom:12 }}>{syncResult}</p>}
               <p style={{ fontSize:13,color:"#374151",marginBottom:16 }}>
                 This device is connected to cloud sync. Students, Staff, Attendance, Grades, and Fees stay in sync with every other device linked to this school — offline changes queue automatically and upload once a connection returns.
               </p>
