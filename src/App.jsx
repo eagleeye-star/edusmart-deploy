@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "5.5.0";
+const APP_VERSION = "5.5.1";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -584,6 +584,7 @@ export default function EduSmart() {
       }}
       licInfo={licInfo}
       cloudSync={cloudSync}
+      notify={notify}
     />
   );
 
@@ -829,7 +830,7 @@ export default function EduSmart() {
 // another device to a school that's already using EduSmart elsewhere
 // (just a Connect Code — no school details or admin account needed,
 // since that data already exists in the cloud).
-function FirstRunWizard({ onComplete, licInfo, cloudSync }) {
+function FirstRunWizard({ onComplete, licInfo, cloudSync, notify }) {
   const [path, setPath] = useState(null); // null | "new" | "join"
   const [step, setStep] = useState(1);
   const [schoolInfo, setSchoolInfo] = useState({ name:"", address:"", phone:"", email:"", motto:"", currentYear:"", principalName:"" });
@@ -906,6 +907,12 @@ function FirstRunWizard({ onComplete, licInfo, cloudSync }) {
           <textarea value={connectCodeInput} onChange={e=>setConnectCodeInput(e.target.value)} style={{ ...inp,height:80,fontFamily:"monospace",fontSize:12,resize:"vertical" }} placeholder="EDUCONNECT-..."/>
         </Row>
         {err&&<p style={{ color:"#dc2626",fontSize:13,marginBottom:10 }}>{err}</p>}
+        {err&&(
+          <button onClick={()=>{cloudSync.disable();setErr("");notify("This device has been reset — try Connect again.");}}
+            style={{ background:"none",border:"none",color:"#1e40af",fontSize:12,cursor:"pointer",textDecoration:"underline",padding:0,marginBottom:14,display:"block" }}>
+            Stuck, or tried before and it didn't work? Reset this device and try again
+          </button>
+        )}
         <div style={{ display:"flex",gap:8 }}>
           <button onClick={()=>{setPath(null);setErr("");}} style={{ ...btnS,flex:1 }} disabled={joining}>← Back</button>
           <button onClick={handleJoin} style={{ ...btnP,flex:2,opacity:joining?0.7:1 }} disabled={joining}>{joining?"Connecting...":"Connect This Device"}</button>

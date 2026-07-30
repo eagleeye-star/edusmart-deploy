@@ -128,11 +128,22 @@ export function isCloudSyncEnabled(storage) {
 // window into the same school.
 export async function joinExistingSchoolAndPullData({ auth, storage, remote, deviceEmail, devicePassword }) {
   const schoolId = await linkExistingCloudSchool({ auth, storage, deviceEmail, devicePassword });
-  const pulled = {};
-  for (const table of ["staff", "students", "attendance", "grades", "fees"]) {
-    pulled[table] = await remote.fetchAll(table);
+  try {
+    const pulled = {};
+    for (const table of ["staff", "students", "attendance", "grades", "fees"]) {
+      pulled[table] = await remote.fetchAll(table);
+    }
+    return { schoolId, pulled };
+  } catch (err) {
+    // The device got linked successfully, but pulling the actual data
+    // failed partway through — leaving it "linked" with no data would
+    // be a dead end (retrying would just say "already linked," with no
+    // way back in without knowing to clear browser storage manually).
+    // Roll back the link so a retry starts clean and can actually
+    // succeed once whatever caused the failure is fixed.
+    unlinkDevice(storage);
+    throw err;
   }
-  return { schoolId, pulled };
 }
 
 export function unlinkDevice(storage) {
