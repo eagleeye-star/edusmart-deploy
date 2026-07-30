@@ -10,7 +10,14 @@
 // Local-only bookkeeping fields that must never be sent to the server —
 // stripping them here (once, in one place) means every call site that
 // writes through the sync engine can't forget to do it.
-const LOCAL_ONLY_FIELDS = ["_syncStatus", "_localUpdatedAt"];
+// "id" is the app's own local tracking field (e.g. "USR9344852") — it
+// is NOT a valid Postgres uuid, and every synced table's real primary
+// key is a server-generated uuid column also called "id". Sending the
+// app's id as part of the payload was crashing every upsert with
+// "invalid input syntax for type uuid" — reproduced and confirmed
+// fixed directly against a real Postgres database, not just a mock.
+// client_id (not id) is what ties a local record to its server row.
+const LOCAL_ONLY_FIELDS = ["id", "_syncStatus", "_localUpdatedAt"];
 
 function stripLocalFields(payload) {
   const clean = { ...payload };
