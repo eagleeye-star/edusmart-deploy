@@ -104,13 +104,9 @@ export async function migrateLocalDataIntoSync({ engine, oldLocalData }) {
   const tables = ["students", "attendance", "grades", "fees", "staff"];
 
   for (const table of tables) {
-    const oldRows = oldLocalData[table] || [];
-    let migrated = 0;
-    for (const row of oldRows) {
-      engine.upsertLocal(table, { ...row, client_id: row.id });
-      migrated++;
-    }
-    results[table] = migrated;
+    const oldRows = (oldLocalData[table] || []).map(row => ({ ...row, client_id: row.id }));
+    engine.upsertLocalBatch(table, oldRows);
+    results[table] = oldRows.length;
   }
   return results;
 }

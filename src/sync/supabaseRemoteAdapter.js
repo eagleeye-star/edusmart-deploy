@@ -29,23 +29,36 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
       return true;
     },
 
-    async upsert(table, payload) {
-      const clean = stripLocalFields(payload);
+    // Accepts either a single record or an array of records — the sync
+    // engine now batches multiple queued writes into one array per
+    // table when it flushes, so a 400-record restore sends a handful
+    // of bulk network calls instead of hundreds of individual ones.
+    async upsert(table, payloadOrArray) {
+      const isBulk = Array.isArray(payloadOrArray);
+      const cleaned = (isBulk ? payloadOrArray : [payloadOrArray]).map(stripLocalFields);
 
       // Staff records need special handling: PINs are never sent as a
       // plain column value — they only ever get set through the
       // set_staff_pin RPC, which hashes them server-side. This means
-      // a brand new staff member is created in two steps: the row
-      // first (without a pin_hash — see migration 004, which allows
-      // this transient state), then the PIN set separately once we
-      // have the row's real server-assigned id.
+      // a staff member is created in two steps: the row first (without
+      // a pin_hash — see migration 004, which allows this transient
+      // state), then the PIN set separately once we have the row's
+      // real server-assigned id. For a bulk batch, the base fields
+      // still go up in ONE call; only the PIN-setting RPC stays
+      // per-record (there's no bulk equivalent for that step, but a
+      // staff list is typically much smaller than a student list).
       if (table === "staff") {
-        const { pin, ...staffFields } = clean;
+        const staffFieldsList = cleaned.map(({ pin, ...rest }) => rest);
         const { data, error } = await supabaseClient
-          .from("staff").upsert(staffFields, { onConflict: "school_id,client_id" }).select().single();
+          .from("staff").upsert(staffFieldsList, { onConflict: "school_id,client_id" }).select();
         if (error) throw error;
-        if (pin) {
-          const { error: pinError } = await supabaseClient.rpc("set_staff_pin", { p_staff_id: data.id, p_new_pin: pin });
+        const savedRows = isBulk ? data : [data?.[0] ?? data];
+        for (let i = 0; i < cleaned.length; i++) {
+          const pin = cleaned[i].pin;
+          if (!pin) continue;
+          const row = savedRows.find(r => r?.client_id === cleaned[i].client_id) || savedRows[i];
+          if (!row) continue;
+          const { error: pinError } = await supabaseClient.rpc("set_staff_pin", { p_staff_id: row.id, p_new_pin: pin });
           if (pinError) throw pinError;
         }
         return;
@@ -55,7 +68,7 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
       // see migration 003_fix_client_id_scope.sql for why: a global
       // client_id constraint would make two different schools' first-
       // ever record (both commonly "STU00001"-style ids) collide.
-      const { error } = await supabaseClient.from(table).upsert(clean, { onConflict: "school_id,client_id" });
+      const { error } = await supabaseClient.from(table).upsert(cleaned, { onConflict: "school_id,client_id" });
       if (error) throw error;
     },
 

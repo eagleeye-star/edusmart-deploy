@@ -121,6 +121,16 @@ export function useCloudSync({ appState, appSetters }) {
     engineRef.current.upsertLocal(table, { ...record, client_id: record.client_id || record.id });
   }, [enabled]);
 
+  // For bulk operations — restoring a backup, or anything touching many
+  // records at once. Sends a handful of batched network calls (one per
+  // table) instead of one call per record; see syncEngine's
+  // upsertLocalBatch for why this matters (a few hundred records used
+  // to mean a few hundred sequential network round-trips).
+  const writeThroughBulk = useCallback((table, records) => {
+    if (!enabled || !engineRef.current || !records?.length) return;
+    engineRef.current.upsertLocalBatch(table, records.map(r => ({ ...r, client_id: r.client_id || r.id })));
+  }, [enabled]);
+
   // Only meaningful once cloud sync is on — verifies a PIN against the
   // server-side hash rather than comparing plaintext locally. The
   // calling code (doLogin) falls back to local comparison when cloud
@@ -196,7 +206,7 @@ export function useCloudSync({ appState, appSetters }) {
   }, []);
 
   return {
-    enabled, status, writeThrough, verifyPin,
+    enabled, status, writeThrough, writeThroughBulk, verifyPin,
     enableNewSchool, joinWithConnectCode, linkToExistingSchool,
     getConnectCode, disable,
   };

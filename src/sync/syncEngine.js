@@ -89,6 +89,46 @@ export function createSyncEngine({ storage, remote, schoolId, onChange, autoFlus
     return stamped;
   }
 
+  // For bulk operations (restoring a backup, migrating existing data) —
+  // stamps and saves potentially hundreds of records in ONE local write
+  // per table, and queues them as ONE batch, instead of one full
+  // read-modify-write cycle per record. Deliberately does NOT
+  // auto-flush per record; the caller does one explicit flush() after,
+  // so a 400-record restore sends a handful of bulk network calls
+  // (grouped by table) instead of 400 sequential ones. That grouping
+  // happens inside flush() itself — see below.
+  function upsertLocalBatch(table, records) {
+    if (!records || records.length === 0) return [];
+    const rows = loadTable(table);
+    const byClientId = new Map(rows.map(r => [r.client_id, r]));
+    const stampedAll = [];
+
+    records.forEach(record => {
+      const clientId = record.client_id || uuid();
+      const stamped = {
+        ...record, client_id: clientId, school_id: schoolId,
+        _syncStatus: "pending", _localUpdatedAt: nowIso(),
+      };
+      byClientId.set(clientId, { ...byClientId.get(clientId), ...stamped });
+      stampedAll.push(stamped);
+    });
+
+    saveTable(table, Array.from(byClientId.values()));
+
+    const queue = loadQueue();
+    const queueByKey = new Map(queue.map(q => [`${q.table}:${q.clientId}`, q]));
+    stampedAll.forEach(stamped => {
+      const key = `${table}:${stamped.client_id}`;
+      const existing = queueByKey.get(key);
+      const entry = { table, clientId: stamped.client_id, payload: stamped, attempts: 0, queuedAt: nowIso() };
+      queueByKey.set(key, existing ? { ...existing, payload: stamped } : entry);
+    });
+    saveQueue(Array.from(queueByKey.values()));
+
+    if (autoFlush) flush();
+    return stampedAll;
+  }
+
   // navigator.onLine only reflects "is a network interface up", not
   // "can we actually reach Supabase" — a school's router can show
   // connected while the internet itself is down. This does a real,
@@ -113,19 +153,33 @@ export function createSyncEngine({ storage, remote, schoolId, onChange, autoFlus
         if (!reachable) return { pushed: 0, remaining: loadQueue().length, offline: true };
 
         let queue = loadQueue();
+        if (queue.length === 0) return { pushed: 0, remaining: 0 };
+
+        // Group by table so a bulk operation (e.g. restoring a 400-
+        // student backup) sends one network call per table instead of
+        // one per record — the difference between ~5 requests and
+        // ~400 sequential ones for exactly the scenario that used to
+        // make a large restore feel like it had hung.
+        const byTable = new Map();
+        queue.forEach(entry => {
+          if (!byTable.has(entry.table)) byTable.set(entry.table, []);
+          byTable.get(entry.table).push(entry);
+        });
+
         let pushed = 0;
         const stillQueued = [];
 
-        for (const entry of queue) {
+        for (const [table, entries] of byTable) {
           try {
-            await remote.upsert(entry.table, entry.payload);
-            const rows = loadTable(entry.table);
-            const idx = rows.findIndex(r => r.client_id === entry.clientId);
-            if (idx >= 0) rows[idx] = { ...rows[idx], _syncStatus: "synced" };
-            saveTable(entry.table, rows);
-            pushed++;
+            await remote.upsert(table, entries.map(e => e.payload));
+            const rows = loadTable(table);
+            const succeededIds = new Set(entries.map(e => e.clientId));
+            const updatedRows = rows.map(r => succeededIds.has(r.client_id) ? { ...r, _syncStatus: "synced" } : r);
+            saveTable(table, updatedRows);
+            pushed += entries.length;
           } catch (e) {
-            stillQueued.push({ ...entry, attempts: entry.attempts + 1, lastError: String(e?.message || e) });
+            const err = String(e?.message || e);
+            entries.forEach(entry => stillQueued.push({ ...entry, attempts: entry.attempts + 1, lastError: err }));
           }
         }
         saveQueue(stillQueued);
@@ -177,5 +231,5 @@ export function createSyncEngine({ storage, remote, schoolId, onChange, autoFlus
     return { pending: queue.length, erroring: queue.filter(q => q.attempts > 0).length };
   }
 
-  return { getAll, upsertLocal, flush, pullRemote, subscribeRealtime, pendingCount, status, isReachable };
+  return { getAll, upsertLocal, upsertLocalBatch, flush, pullRemote, subscribeRealtime, pendingCount, status, isReachable };
 }

@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "5.5.1";
+const APP_VERSION = "5.5.2";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -3486,15 +3486,18 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
     // Restoring a backup bypasses the normal per-record save points
     // entirely, so cloud sync (which only hooks into those save
     // points) would otherwise never learn any of this happened. Push
-    // every restored record through it explicitly, the same way it
-    // would have gone up if entered one at a time.
+    // every restored table in one batched call each — not one call
+    // per record, which for a few hundred students used to mean a
+    // few hundred sequential network round-trips (minutes of the app
+    // looking stuck, with no error, while it silently worked through
+    // the backlog one record at a time).
     if (cloudSync?.enabled) {
-      (d.students||[]).forEach(r=>cloudSync.writeThrough("students", r));
-      (d.attendance||[]).forEach(r=>cloudSync.writeThrough("attendance", r));
-      (d.grades||[]).forEach(r=>cloudSync.writeThrough("grades", r));
-      (d.fees||[]).forEach(r=>cloudSync.writeThrough("fees", r));
-      (d.users||[]).forEach(r=>cloudSync.writeThrough("staff", r));
-      notify("Backup restored ✅ — pushing to cloud sync in the background");
+      cloudSync.writeThroughBulk("students", d.students||[]);
+      cloudSync.writeThroughBulk("attendance", d.attendance||[]);
+      cloudSync.writeThroughBulk("grades", d.grades||[]);
+      cloudSync.writeThroughBulk("fees", d.fees||[]);
+      cloudSync.writeThroughBulk("staff", d.users||[]);
+      notify("Backup restored ✅ — syncing to the cloud in the background");
     } else {
       notify("Backup restored ✅");
     }
