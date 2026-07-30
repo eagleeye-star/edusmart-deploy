@@ -25,6 +25,42 @@ function stripLocalFields(payload) {
   return clean;
 }
 
+// The app's own fields are camelCase (matching normal JS convention);
+// the database columns are snake_case (matching normal Postgres
+// convention). Anywhere these two conventions produce a genuinely
+// different name — not just a different case, an actually different
+// string — needs an explicit mapping, or Postgres correctly rejects
+// the column as not existing. This was found the hard way: the
+// "classAssigned" error was the first of several identical mismatches
+// across every synced table (students, attendance, grades, fees all
+// had at least one), found and fixed together — see migration
+// 006_fix_field_mismatches.sql for the full story and the reasoning
+// behind also changing student_id/entered_by from uuid to text.
+const FIELD_MAPS = {
+  staff:      { classAssigned: "class_assigned", photo: "photo_url" },
+  students:   { photo: "photo_url" },
+  attendance: { studentId: "student_id", enteredBy: "entered_by" },
+  grades:     { studentId: "student_id", enteredBy: "entered_by" },
+  fees:       { studentId: "student_id", enteredBy: "entered_by", receiptNo: "receipt_no" },
+};
+
+function toDbFields(table, obj) {
+  const map = FIELD_MAPS[table];
+  if (!map) return obj;
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) out[map[k] || k] = v;
+  return out;
+}
+
+function fromDbFields(table, obj) {
+  const map = FIELD_MAPS[table];
+  if (!map) return obj;
+  const reverse = Object.fromEntries(Object.entries(map).map(([a, b]) => [b, a]));
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) out[reverse[k] || k] = v;
+  return out;
+}
+
 export function createSupabaseRemoteAdapter(supabaseClient) {
   return {
     async ping() {
@@ -55,7 +91,7 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
       // per-record (there's no bulk equivalent for that step, but a
       // staff list is typically much smaller than a student list).
       if (table === "staff") {
-        const staffFieldsList = cleaned.map(({ pin, ...rest }) => rest);
+        const staffFieldsList = cleaned.map(({ pin, ...rest }) => toDbFields("staff", rest));
         const { data, error } = await supabaseClient
           .from("staff").upsert(staffFieldsList, { onConflict: "school_id,client_id" }).select();
         if (error) throw error;
@@ -75,7 +111,8 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
       // see migration 003_fix_client_id_scope.sql for why: a global
       // client_id constraint would make two different schools' first-
       // ever record (both commonly "STU00001"-style ids) collide.
-      const { error } = await supabaseClient.from(table).upsert(cleaned, { onConflict: "school_id,client_id" });
+      const mapped = cleaned.map(c => toDbFields(table, c));
+      const { error } = await supabaseClient.from(table).upsert(mapped, { onConflict: "school_id,client_id" });
       if (error) throw error;
     },
 
@@ -90,7 +127,7 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
       if (sinceIso) query = query.gte("updated_at", sinceIso);
       const { data, error } = await query;
       if (error) throw error;
-      return data;
+      return (data || []).map(row => fromDbFields(table, row));
     },
 
     // One-time fetch of the school's own profile row — used when a new
