@@ -9,6 +9,19 @@
 
 const DEVICE_LINK_KEY = "edusmart_cloud_link_v1";
 
+// Auto-generates a device email + password so nobody has to invent
+// (or remember) either one — this is what gets packaged into a
+// Connect Code. The email needs to pass Supabase's format validator,
+// which rejects made-up TLDs like .local (found the hard way earlier
+// in this project), so it uses a realistic-looking domain instead —
+// it's never actually emailed to anyone.
+export function generateDeviceCredentials() {
+  const rand = () => Math.random().toString(36).slice(2);
+  const email = `edusmart.${rand()}${Date.now().toString(36)}@gmail.com`;
+  const password = `${rand()}${rand()}${rand()}`.slice(0, 24);
+  return { deviceEmail: email, devicePassword: password };
+}
+
 export function getDeviceLink(storage) {
   try { return JSON.parse(storage.getItem(DEVICE_LINK_KEY) || "null"); }
   catch (e) { return null; }
@@ -37,10 +50,16 @@ export async function setUpNewCloudSchool({ auth, storage, schoolName, deviceEma
   const existing = getDeviceLink(storage);
   if (existing) throw new Error("This device is already linked to a school. Unlink first if you need to change it.");
 
-  await auth.signUpAndSignIn(deviceEmail, devicePassword);
+  // Auto-generate credentials unless explicitly provided (tests still
+  // pass their own for determinism) — the admin never invents or
+  // types an email/password; they just get shown a Connect Code
+  // afterward that packages these up for other devices to use.
+  const creds = (deviceEmail && devicePassword) ? { deviceEmail, devicePassword } : generateDeviceCredentials();
+
+  await auth.signUpAndSignIn(creds.deviceEmail, creds.devicePassword);
   const schoolId = await auth.registerSchool(schoolName);
 
-  saveDeviceLink(storage, { schoolId, deviceEmail, devicePassword, linkedAt: new Date().toISOString() });
+  saveDeviceLink(storage, { schoolId, deviceEmail: creds.deviceEmail, devicePassword: creds.devicePassword, linkedAt: new Date().toISOString() });
   return schoolId;
 }
 
@@ -82,7 +101,7 @@ export async function linkExistingCloudSchool({ auth, storage, deviceEmail, devi
  */
 export async function migrateLocalDataIntoSync({ engine, oldLocalData }) {
   const results = {};
-  const tables = ["students", "attendance", "grades", "fees"];
+  const tables = ["students", "attendance", "grades", "fees", "staff"];
 
   for (const table of tables) {
     const oldRows = oldLocalData[table] || [];
@@ -98,6 +117,22 @@ export async function migrateLocalDataIntoSync({ engine, oldLocalData }) {
 
 export function isCloudSyncEnabled(storage) {
   return !!getDeviceLink(storage);
+}
+
+// Used by the "Add This Device" first-run path: connects to a school
+// that already has Cloud Sync running elsewhere, and pulls down
+// everything needed to populate a brand new device from scratch —
+// staff (so the login screen has real names to pick from), plus
+// students/attendance/grades/fees. No admin account gets created and
+// no school details get re-entered — this device just becomes another
+// window into the same school.
+export async function joinExistingSchoolAndPullData({ auth, storage, remote, deviceEmail, devicePassword }) {
+  const schoolId = await linkExistingCloudSchool({ auth, storage, deviceEmail, devicePassword });
+  const pulled = {};
+  for (const table of ["staff", "students", "attendance", "grades", "fees"]) {
+    pulled[table] = await remote.fetchAll(table);
+  }
+  return { schoolId, pulled };
 }
 
 export function unlinkDevice(storage) {

@@ -7,6 +7,11 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Generator works immediately without needing to be added to a list here.
 // This constant MUST match the same constant in the Licence Generator app —
 // changing it invalidates every key issued before the change.
+// Single source of truth for the version shown throughout the app —
+// keep this in sync with package.json's version each release, since
+// nothing wires them together automatically at build time.
+const APP_VERSION = "5.5.0";
+
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
 function simpleHash(str) {
@@ -383,6 +388,7 @@ export default function EduSmart() {
   const [pin,       setPin]       = useState("");
   const [authErr,   setAuthErr]   = useState("");
   const [showRecovery, setShowRecovery] = useState(false);
+  const [loggingIn, setLoggingIn] = useState(false);
   const [recoveryKey, setRecoveryKey] = useState("");
   const [section,   setSection]   = useState("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -415,9 +421,13 @@ export default function EduSmart() {
 
   // Cloud sync — a no-op layer when not enabled, so nothing below this
   // point changes app behavior unless the school has actually turned it on.
+  // "staff" is the key used for the sync table (matching the backend);
+  // the app's own state variable for the same data is "users" — mapped
+  // here so useCloudSync's internals can stay consistently keyed by
+  // table name throughout.
   const cloudSync = useCloudSync({
-    appState: { students, attendance, grades, fees },
-    appSetters: { students: setStudents, attendance: setAttendance, grades: setGrades, fees: setFees },
+    appState: { students, attendance, grades, fees, staff: users, school },
+    appSetters: { students: setStudents, attendance: setAttendance, grades: setGrades, fees: setFees, staff: setUsers, school: setSchool },
   });
 
   // Save everything back to local storage shortly after any change.
@@ -480,12 +490,34 @@ export default function EduSmart() {
     return Math.max(0, Math.ceil((LOCKOUT_DURATION_MS - (Date.now()-rec.lockedAt))/60000));
   }
 
-  function doLogin() {
+  async function doLogin() {
     const u = users.find(x=>x.id===selUser && x.active);
     if (!u) { setAuthErr("User not found or inactive."); return; }
     if (isLocked(selUser)) { setAuthErr(`Account locked. Try again in ${lockoutRemaining(selUser)} minute(s), or use the recovery option below.`); return; }
     const fails = failedLogins[selUser]?.count||0;
-    if (u.pin !== pin) {
+
+    setLoggingIn(true);
+    let pinCorrect;
+    if (cloudSync?.enabled) {
+      try {
+        pinCorrect = (await cloudSync.verifyPin(u.id, pin)) === true;
+      } catch (e) {
+        // No internet right now — fall back to whatever PIN this
+        // device last saw locally, rather than blocking login outright.
+        // Login staying offline-capable matters as much for cloud-sync
+        // schools as it does for local-only ones. A brand new device
+        // that joined via Connect Code and has never seen this staff
+        // member's PIN locally genuinely can't verify it offline —
+        // that's a narrow, honest limitation, not a silent failure.
+        if (u.pin) { pinCorrect = u.pin === pin; }
+        else { setLoggingIn(false); setAuthErr("Can't verify this PIN while offline on a device that hasn't seen it before. Try again once you're back online."); return; }
+      }
+    } else {
+      pinCorrect = u.pin === pin;
+    }
+    setLoggingIn(false);
+
+    if (!pinCorrect) {
       const newFails = fails+1;
       const locked = newFails>=3;
       setFailedLogins(p=>({...p,[selUser]:{ count:newFails, lockedAt: locked?Date.now():null }}));
@@ -519,7 +551,7 @@ export default function EduSmart() {
         <div style={{ textAlign:"center",marginBottom:24 }}>
           <div style={{ fontSize:52 }}>🏫</div>
           <h1 style={{ fontSize:28,fontWeight:700,color:"#0f172a",margin:"8px 0 4px" }}>EduSmart</h1>
-          <p style={{ color:"#64748b",margin:0,fontSize:13 }}>School Manager v5.0</p>
+          <p style={{ color:"#64748b",margin:0,fontSize:13 }}>School Manager v{APP_VERSION}</p>
         </div>
         <Row label="Licence Key">
           <input value={licKey} onChange={e=>setLicKey(e.target.value.toUpperCase())} placeholder="EDU-XXXXX-XXXXX-XXXXX-XXXXX"
@@ -551,6 +583,7 @@ export default function EduSmart() {
         setAuditLog(p=>[...p,{ id:uid("AUD"), user:adminUser.code, action:"First-run setup completed — school and admin account created", section:"Settings", timestamp:nowStr() }]);
       }}
       licInfo={licInfo}
+      cloudSync={cloudSync}
     />
   );
 
@@ -575,7 +608,7 @@ export default function EduSmart() {
             style={inp} onKeyDown={e=>e.key==="Enter"&&doLogin()} maxLength={4}/>
         </Row>
         {authErr&&<p style={{ color:"#dc2626",fontSize:13,marginBottom:10 }}>{authErr}</p>}
-        <button onClick={doLogin} style={{ ...btnP,width:"100%",padding:12,fontSize:15 }}>Login</button>
+        <button onClick={doLogin} disabled={loggingIn} style={{ ...btnP,width:"100%",padding:12,fontSize:15,opacity:loggingIn?0.7:1 }}>{loggingIn?"Checking...":"Login"}</button>
 
         {selUser && isLocked(selUser) && (
           <div style={{ marginTop:14,paddingTop:14,borderTop:"1px solid #e5e7eb" }}>
@@ -595,7 +628,7 @@ export default function EduSmart() {
             )}
           </div>
         )}
-        <p style={{ textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:10 }}>EduSmart v5.0 | {school.name}</p>
+        <p style={{ textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:10 }}>EduSmart v{APP_VERSION} | {school.name}</p>
       </div>
     </div>
   );
@@ -791,13 +824,19 @@ export default function EduSmart() {
 
 // ─── FIRST-RUN SETUP WIZARD ────────────────────────────────────
 // Shown once on a brand new install: no staff exist yet, so there's no one
-// to log in as. Walks through school profile + the first Admin account,
-// then hands both back to the App to seed state and log the new admin in.
-function FirstRunWizard({ onComplete, licInfo }) {
+// to log in as. Branches into two paths: a genuinely new school (the
+// original flow — School Profile → Create Admin Account), or adding
+// another device to a school that's already using EduSmart elsewhere
+// (just a Connect Code — no school details or admin account needed,
+// since that data already exists in the cloud).
+function FirstRunWizard({ onComplete, licInfo, cloudSync }) {
+  const [path, setPath] = useState(null); // null | "new" | "join"
   const [step, setStep] = useState(1);
   const [schoolInfo, setSchoolInfo] = useState({ name:"", address:"", phone:"", email:"", motto:"", currentYear:"", principalName:"" });
   const [admin, setAdmin] = useState({ name:"", pin:"", confirmPin:"", email:"" });
   const [err, setErr] = useState("");
+  const [connectCodeInput, setConnectCodeInput] = useState("");
+  const [joining, setJoining] = useState(false);
 
   const nextFromSchool = () => {
     if (!schoolInfo.name.trim()) { setErr("Enter your school's name to continue."); return; }
@@ -820,6 +859,62 @@ function FirstRunWizard({ onComplete, licInfo }) {
     });
   };
 
+  const handleJoin = async () => {
+    if (!connectCodeInput.trim()) { setErr("Paste the Connect Code you were given."); return; }
+    setJoining(true); setErr("");
+    try {
+      await cloudSync.joinWithConnectCode(connectCodeInput.trim());
+      // No onComplete() call here — joining pulls real staff down
+      // directly into app state, so the app naturally proceeds straight
+      // to the normal staff login screen once this component unmounts
+      // (users.length is no longer 0).
+    } catch (e) {
+      setJoining(false);
+      setErr(e?.message || "Couldn't connect with that code. Double-check it and try again.");
+    }
+  };
+
+  // ─── Path chooser ───
+  if (!path) return (
+    <div style={{ minHeight:"100vh",background:"linear-gradient(135deg,#0f172a,#1e3a5f)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Segoe UI',sans-serif",padding:16 }}>
+      <div style={{ background:"#fff",borderRadius:16,padding:40,maxWidth:480,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.4)" }}>
+        <div style={{ textAlign:"center",marginBottom:28 }}>
+          <div style={{ fontSize:44 }}>🎉</div>
+          <h1 style={{ fontSize:24,fontWeight:700,color:"#0f172a",margin:"8px 0 4px" }}>Welcome to EduSmart</h1>
+          <p style={{ color:"#64748b",margin:0,fontSize:13 }}>Is this a new school, or are you adding a device to a school already using EduSmart?</p>
+        </div>
+        <button onClick={()=>setPath("new")} style={{ ...btnP,width:"100%",padding:16,fontSize:15,marginBottom:12,textAlign:"left" }}>
+          🏫 New School<div style={{ fontWeight:400,fontSize:12,opacity:0.85,marginTop:4 }}>Set up EduSmart for the first time — school profile and your admin account</div>
+        </button>
+        <button onClick={()=>setPath("join")} style={{ ...btnS,width:"100%",padding:16,fontSize:15,textAlign:"left" }}>
+          💻 Add This Device<div style={{ fontWeight:400,fontSize:12,color:"#64748b",marginTop:4 }}>This school already uses EduSmart elsewhere — connect with a Connect Code</div>
+        </button>
+      </div>
+    </div>
+  );
+
+  // ─── Join an existing school ───
+  if (path === "join") return (
+    <div style={{ minHeight:"100vh",background:"linear-gradient(135deg,#0f172a,#1e3a5f)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Segoe UI',sans-serif",padding:16 }}>
+      <div style={{ background:"#fff",borderRadius:16,padding:40,maxWidth:480,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.4)" }}>
+        <div style={{ textAlign:"center",marginBottom:24 }}>
+          <div style={{ fontSize:40 }}>💻</div>
+          <h1 style={{ fontSize:22,fontWeight:700,color:"#0f172a",margin:"8px 0 4px" }}>Add This Device</h1>
+          <p style={{ color:"#64748b",margin:0,fontSize:13 }}>Enter the Connect Code from a device that's already set up for this school (Settings → Cloud Sync).</p>
+        </div>
+        <Row label="Connect Code">
+          <textarea value={connectCodeInput} onChange={e=>setConnectCodeInput(e.target.value)} style={{ ...inp,height:80,fontFamily:"monospace",fontSize:12,resize:"vertical" }} placeholder="EDUCONNECT-..."/>
+        </Row>
+        {err&&<p style={{ color:"#dc2626",fontSize:13,marginBottom:10 }}>{err}</p>}
+        <div style={{ display:"flex",gap:8 }}>
+          <button onClick={()=>{setPath(null);setErr("");}} style={{ ...btnS,flex:1 }} disabled={joining}>← Back</button>
+          <button onClick={handleJoin} style={{ ...btnP,flex:2,opacity:joining?0.7:1 }} disabled={joining}>{joining?"Connecting...":"Connect This Device"}</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ─── New school setup (original flow, unchanged) ───
   return (
     <div style={{ minHeight:"100vh",background:"linear-gradient(135deg,#0f172a,#1e3a5f)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Segoe UI',sans-serif",padding:16 }}>
       <div style={{ background:"#fff",borderRadius:16,padding:40,maxWidth:480,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.4)" }}>
@@ -838,7 +933,10 @@ function FirstRunWizard({ onComplete, licInfo }) {
             <Row label="Email"><input value={schoolInfo.email} onChange={e=>setSchoolInfo(p=>({...p,email:e.target.value}))} style={inp}/></Row>
             <Row label="Academic Year"><input value={schoolInfo.currentYear} onChange={e=>setSchoolInfo(p=>({...p,currentYear:e.target.value}))} style={inp} placeholder="e.g. 2025/2026"/></Row>
             {err&&<p style={{ color:"#dc2626",fontSize:13,marginBottom:10 }}>{err}</p>}
-            <button onClick={nextFromSchool} style={{ ...btnP,width:"100%",padding:12,fontSize:15 }}>Continue →</button>
+            <div style={{ display:"flex",gap:8 }}>
+              <button onClick={()=>setPath(null)} style={{ ...btnS,flex:1 }}>← Back</button>
+              <button onClick={nextFromSchool} style={{ ...btnP,flex:2 }}>Continue →</button>
+            </div>
           </>
         )}
 
@@ -1341,7 +1439,7 @@ function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,
 }
 
 // ─── STAFF ───────────────────────────────────────────────────
-function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser,classes,initialSearch }) {
+function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser,classes,initialSearch,cloudSync }) {
   const [filterRole,setFilterRole]=useState("");
   const [showForm,setShowForm]=useState(false); const [editId,setEditId]=useState(null);
   const blank = { name:"",role:"Teacher",pin:"",code:"",email:"",classAssigned:"",active:true,salary:1500,transport:150,housing:0,ssnit:true,photo:"" };
@@ -1351,8 +1449,17 @@ function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser,classes,
 
   const save = () => {
     if(!form.name||!form.pin||!form.code){ notify("Name, PIN and Code required","error"); return; }
-    if(editId){ setUsers(p=>p.map(u=>u.id===editId?{...u,...form}:u)); addAudit(`Edited: ${form.name}`,"Staff"); notify("Staff updated"); }
-    else { setUsers(p=>[...p,{...form,id:uid("USR")}]); addAudit(`Added: ${form.name}`,"Staff"); notify("Staff added"); }
+    if(editId){
+      const updated = {...users.find(u=>u.id===editId),...form};
+      setUsers(p=>p.map(u=>u.id===editId?updated:u));
+      cloudSync?.writeThrough("staff", updated);
+      addAudit(`Edited: ${form.name}`,"Staff"); notify("Staff updated");
+    } else {
+      const newStaff = {...form,id:uid("USR")};
+      setUsers(p=>[...p,newStaff]);
+      cloudSync?.writeThrough("staff", newStaff);
+      addAudit(`Added: ${form.name}`,"Staff"); notify("Staff added");
+    }
     setShowForm(false); setEditId(null); setForm(blank);
   };
 
@@ -3230,34 +3337,45 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   const fileInputRef = useRef(null);
   const [newClassName,setNewClassName]=useState(""); const [newClassLevel,setNewClassLevel]=useState("Primary");
   const [newSubject,setNewSubject]=useState("");
-  const [cloudMode,setCloudMode]=useState("new"); // "new" | "link"
-  const [cloudForm,setCloudForm]=useState({ schoolName:school.name||"", deviceEmail:"", devicePassword:"" });
+  const [cloudMode,setCloudMode]=useState("new"); // "new" | "join"
+  const [cloudForm,setCloudForm]=useState({ schoolName:school.name||"" });
+  const [joinCode,setJoinCode]=useState("");
   const [cloudBusy,setCloudBusy]=useState(false);
   const [cloudErr,setCloudErr]=useState("");
   const [migrationResult,setMigrationResult]=useState(null);
+  const [setupConnectCode,setSetupConnectCode]=useState(null);
+  const [codeCopied,setCodeCopied]=useState(false);
 
   const save=()=>{ setSchool({...form}); addAudit("Updated school settings","Settings"); notify("Settings saved ✅"); };
 
   const handleEnableCloud=async()=>{
-    if(!cloudForm.deviceEmail||!cloudForm.devicePassword){ setCloudErr("Enter a device email and password."); return; }
-    if(cloudMode==="new"&&!cloudForm.schoolName.trim()){ setCloudErr("Enter a school name."); return; }
     setCloudBusy(true); setCloudErr("");
     try{
       if(cloudMode==="new"){
-        const results = await cloudSync.enableNewSchool({ schoolName:cloudForm.schoolName.trim(), deviceEmail:cloudForm.deviceEmail.trim(), devicePassword:cloudForm.devicePassword });
+        if(!cloudForm.schoolName.trim()){ setCloudErr("Enter a school name."); setCloudBusy(false); return; }
+        const { results, connectCode } = await cloudSync.enableNewSchool({ schoolName:cloudForm.schoolName.trim() });
         setMigrationResult(results);
+        setSetupConnectCode(connectCode);
         addAudit("Cloud sync enabled — new school registered and existing data migrated","Settings");
         notify("Cloud sync enabled ✅");
       } else {
-        await cloudSync.linkToExistingSchool({ deviceEmail:cloudForm.deviceEmail.trim(), devicePassword:cloudForm.devicePassword });
-        addAudit("Cloud sync enabled — linked to existing school","Settings");
-        notify("Linked to existing school ✅");
+        if(!joinCode.trim()){ setCloudErr("Paste the Connect Code from your other device."); setCloudBusy(false); return; }
+        await cloudSync.joinWithConnectCode(joinCode.trim());
+        addAudit("Cloud sync enabled — connected to existing school","Settings");
+        notify("Connected ✅");
       }
     } catch(e){
       setCloudErr(e?.message || "Something went wrong connecting to the cloud.");
     } finally {
       setCloudBusy(false);
     }
+  };
+
+  const copyConnectCode=()=>{
+    const code = setupConnectCode || cloudSync.getConnectCode?.();
+    if(!code) return;
+    navigator.clipboard?.writeText(code);
+    setCodeCopied(true); setTimeout(()=>setCodeCopied(false),2000);
   };
 
   const handleDisableCloud=()=>{
@@ -3269,7 +3387,10 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
 
   const resetPin=()=>{
     if(!resetId||!newPin||newPin.length!==4){ notify("Select staff and enter 4-digit PIN","error"); return; }
-    setUsers(p=>p.map(u=>u.id===resetId?{...u,pin:newPin}:u));
+    const target = users.find(u=>u.id===resetId);
+    const updated = {...target, pin:newPin};
+    setUsers(p=>p.map(u=>u.id===resetId?updated:u));
+    cloudSync?.writeThrough("staff", updated);
     addAudit(`PIN reset for ${resetId}`,"Settings"); notify("PIN reset successfully"); setResetId(""); setNewPin("");
   };
 
@@ -3354,8 +3475,25 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
     if(d.classLevels) setClassLevels(d.classLevels);
     if(d.subjects) setSubjects(d.subjects);
     if(d.yearArchive) setYearArchive(d.yearArchive);
+
+    // Restoring a backup bypasses the normal per-record save points
+    // entirely, so cloud sync (which only hooks into those save
+    // points) would otherwise never learn any of this happened. Push
+    // every restored record through it explicitly, the same way it
+    // would have gone up if entered one at a time.
+    if (cloudSync?.enabled) {
+      (d.students||[]).forEach(r=>cloudSync.writeThrough("students", r));
+      (d.attendance||[]).forEach(r=>cloudSync.writeThrough("attendance", r));
+      (d.grades||[]).forEach(r=>cloudSync.writeThrough("grades", r));
+      (d.fees||[]).forEach(r=>cloudSync.writeThrough("fees", r));
+      (d.users||[]).forEach(r=>cloudSync.writeThrough("staff", r));
+      notify("Backup restored ✅ — pushing to cloud sync in the background");
+    } else {
+      notify("Backup restored ✅");
+    }
+
     addAudit(`Restored backup from ${d.exportDate||"unknown date"}`,"Settings");
-    notify("Backup restored ✅"); setImportFile(null);
+    setImportFile(null);
     if(fileInputRef.current) fileInputRef.current.value="";
   };
 
@@ -3466,41 +3604,53 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
         <Card style={{ padding:24,maxWidth:560 }}>
           <h3 style={{ margin:"0 0 6px",fontSize:16 }}>☁️ Cloud Sync</h3>
           <p style={{ fontSize:12,color:"#64748b",marginBottom:18 }}>
-            Lets multiple devices (the office PC, a teacher's laptop) share the same live student, attendance, grade, and fee data — working offline stays fully supported, changes just sync automatically once a connection is available.
+            Lets multiple devices (the office PC, a teacher's laptop, the browser version) share the same live student, staff, attendance, grade, and fee data — working offline stays fully supported, changes just sync automatically once a connection is available.
           </p>
 
           {!cloudSync?.enabled ? (
             <>
               <div style={{ display:"flex",gap:8,marginBottom:16 }}>
-                <button onClick={()=>setCloudMode("new")} style={{ ...btnSm,flex:1,padding:"10px",background:cloudMode==="new"?"#1e40af":"#f1f5f9",color:cloudMode==="new"?"#fff":"#374151" }}>Set Up New (first device)</button>
-                <button onClick={()=>setCloudMode("link")} style={{ ...btnSm,flex:1,padding:"10px",background:cloudMode==="link"?"#1e40af":"#f1f5f9",color:cloudMode==="link"?"#fff":"#374151" }}>Link to Existing School</button>
+                <button onClick={()=>{setCloudMode("new");setCloudErr("");}} style={{ ...btnSm,flex:1,padding:"10px",background:cloudMode==="new"?"#1e40af":"#f1f5f9",color:cloudMode==="new"?"#fff":"#374151" }}>Set Up New (first device)</button>
+                <button onClick={()=>{setCloudMode("join");setCloudErr("");}} style={{ ...btnSm,flex:1,padding:"10px",background:cloudMode==="join"?"#1e40af":"#f1f5f9",color:cloudMode==="join"?"#fff":"#374151" }}>Add This Device</button>
               </div>
 
-              {cloudMode==="new" && (
-                <div style={{ background:"#f0f9ff",borderRadius:8,padding:12,fontSize:12,color:"#0369a1",marginBottom:14 }}>
-                  This is the first device connecting this school to the cloud. Your existing local students, attendance, grades, and fees will be uploaded automatically as the starting dataset — nothing is deleted or changed locally.
-                </div>
+              {cloudMode==="new" && !setupConnectCode && (
+                <>
+                  <div style={{ background:"#f0f9ff",borderRadius:8,padding:12,fontSize:12,color:"#0369a1",marginBottom:14 }}>
+                    This is the first device connecting this school to the cloud. Your existing local students, staff, attendance, grades, and fees will be uploaded automatically as the starting dataset — nothing is deleted or changed locally.
+                  </div>
+                  <Row label="School Name"><input value={cloudForm.schoolName} onChange={e=>setCloudForm(p=>({...p,schoolName:e.target.value}))} style={inp}/></Row>
+                  {cloudErr&&<p style={{ color:"#dc2626",fontSize:13,marginBottom:10 }}>{cloudErr}</p>}
+                  <button onClick={handleEnableCloud} disabled={cloudBusy} style={{ ...btnP,width:"100%",opacity:cloudBusy?0.6:1 }}>
+                    {cloudBusy?"Setting up...":"Enable Cloud Sync"}
+                  </button>
+                </>
               )}
-              {cloudMode==="link" && (
-                <div style={{ background:"#f0f9ff",borderRadius:8,padding:12,fontSize:12,color:"#0369a1",marginBottom:14 }}>
-                  Use this on a second device (e.g. a teacher's laptop) once another device has already set up cloud sync for this school. Enter the SAME device email and password used on that first device.
+
+              {cloudMode==="new" && setupConnectCode && (
+                <div style={{ background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:16 }}>
+                  <div style={{ fontSize:13,fontWeight:600,color:"#166534",marginBottom:8 }}>✅ Cloud Sync is on. Save this Connect Code — you'll need it to add any other device to this school.</div>
+                  {migrationResult&&(
+                    <div style={{ fontSize:12,color:"#166534",marginBottom:10 }}>
+                      Uploaded: {migrationResult.students} students, {migrationResult.staff||0} staff, {migrationResult.attendance} attendance records, {migrationResult.grades} grades, {migrationResult.fees} fee records.
+                    </div>
+                  )}
+                  <div style={{ background:"#fff",border:"1px solid #d1d5db",borderRadius:8,padding:10,fontFamily:"monospace",fontSize:11,wordBreak:"break-all",marginBottom:10 }}>{setupConnectCode}</div>
+                  <button onClick={copyConnectCode} style={{ ...btnP,width:"100%",background:codeCopied?"#166534":"#1e40af" }}>{codeCopied?"✅ Copied!":"📋 Copy Connect Code"}</button>
                 </div>
               )}
 
-              {cloudMode==="new" && (
-                <Row label="School Name"><input value={cloudForm.schoolName} onChange={e=>setCloudForm(p=>({...p,schoolName:e.target.value}))} style={inp}/></Row>
-              )}
-              <Row label="Device Email"><input value={cloudForm.deviceEmail} onChange={e=>setCloudForm(p=>({...p,deviceEmail:e.target.value}))} style={inp} placeholder="e.g. eikwe.device@gmail.com"/></Row>
-              <Row label="Device Password"><input type="password" value={cloudForm.devicePassword} onChange={e=>setCloudForm(p=>({...p,devicePassword:e.target.value}))} style={inp}/></Row>
-              {cloudErr&&<p style={{ color:"#dc2626",fontSize:13,marginBottom:10 }}>{cloudErr}</p>}
-              <button onClick={handleEnableCloud} disabled={cloudBusy} style={{ ...btnP,width:"100%",opacity:cloudBusy?0.6:1 }}>
-                {cloudBusy?"Connecting...":(cloudMode==="new"?"Enable Cloud Sync":"Link This Device")}
-              </button>
-
-              {migrationResult&&(
-                <div style={{ background:"#f0fdf4",borderRadius:8,padding:12,marginTop:14,fontSize:12,color:"#166534" }}>
-                  <strong>Migration complete:</strong> {migrationResult.students} students, {migrationResult.attendance} attendance records, {migrationResult.grades} grades, {migrationResult.fees} fee records uploaded to the cloud.
-                </div>
+              {cloudMode==="join" && (
+                <>
+                  <div style={{ background:"#f0f9ff",borderRadius:8,padding:12,fontSize:12,color:"#0369a1",marginBottom:14 }}>
+                    Use this on any additional device (a teacher's laptop, the browser version) once another device has already set up Cloud Sync for this school. Paste the Connect Code shown on that device's Settings → Cloud Sync page — no need to re-enter the school profile or create another admin account.
+                  </div>
+                  <Row label="Connect Code"><textarea value={joinCode} onChange={e=>setJoinCode(e.target.value)} style={{ ...inp,height:80,fontFamily:"monospace",fontSize:12,resize:"vertical" }} placeholder="EDUCONNECT-..."/></Row>
+                  {cloudErr&&<p style={{ color:"#dc2626",fontSize:13,marginBottom:10 }}>{cloudErr}</p>}
+                  <button onClick={handleEnableCloud} disabled={cloudBusy} style={{ ...btnP,width:"100%",opacity:cloudBusy?0.6:1 }}>
+                    {cloudBusy?"Connecting...":"Connect This Device"}
+                  </button>
+                </>
               )}
             </>
           ) : (
@@ -3514,8 +3664,15 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
                 {cloudSync.status.pending>0 && <Badge text={`${cloudSync.status.pending} pending sync`} color="#92400e" bg="#fef3c7"/>}
               </div>
               <p style={{ fontSize:13,color:"#374151",marginBottom:16 }}>
-                This device is connected to cloud sync. Students, Attendance, Grades, and Fees stay in sync with every other device linked to this school — offline changes queue automatically and upload once a connection returns.
+                This device is connected to cloud sync. Students, Staff, Attendance, Grades, and Fees stay in sync with every other device linked to this school — offline changes queue automatically and upload once a connection returns.
               </p>
+
+              <div style={{ background:"#f8fafc",borderRadius:8,padding:14,marginBottom:16 }}>
+                <div style={{ fontSize:12,fontWeight:600,color:"#374151",marginBottom:8 }}>Connect Code for adding another device</div>
+                <div style={{ background:"#fff",border:"1px solid #d1d5db",borderRadius:8,padding:10,fontFamily:"monospace",fontSize:11,wordBreak:"break-all",marginBottom:10 }}>{cloudSync.getConnectCode?.()}</div>
+                <button onClick={copyConnectCode} style={{ ...btnS,width:"100%",background:codeCopied?"#dcfce7":undefined,color:codeCopied?"#166534":undefined }}>{codeCopied?"✅ Copied!":"📋 Copy Connect Code"}</button>
+              </div>
+
               <button onClick={handleDisableCloud} style={{ ...btnS,background:"#fee2e2",color:"#991b1b" }}>Turn Off Cloud Sync on This Device</button>
             </>
           )}
@@ -3526,7 +3683,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
         <Card style={{ padding:24,maxWidth:480 }}>
           <h3 style={{ margin:"0 0 16px",fontSize:16 }}>Licence</h3>
           <div style={{ background:"#f0f9ff",borderRadius:10,padding:16,fontSize:13,lineHeight:2,marginBottom:16 }}>
-            <div><strong>Product:</strong> EduSmart School Manager v5.0</div>
+            <div><strong>Product:</strong> EduSmart School Manager v{APP_VERSION}</div>
             <div><strong>Type:</strong> <Badge text={licInfo?.type?.toUpperCase()||"—"} color={licInfo?.type==="pro"?"#166534":"#1d4ed8"} bg={licInfo?.type==="pro"?"#dcfce7":"#dbeafe"}/></div>
             <div><strong>Expiry:</strong> {licInfo?.lifetime ? "Lifetime — never expires" : (licInfo?.expiry || "—")}</div>
             <div><strong>Developer:</strong> Gilbert Oscar Prah</div>
