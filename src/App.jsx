@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "5.6.0";
+const APP_VERSION = "5.6.1";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -218,6 +218,21 @@ function Modal({ title, onClose, children, wide }) {
         </div>
         {children}
       </div>
+    </div>
+  );
+}
+
+// Reusable header for every printed document (receipts, report cards,
+// letters, ID cards) — shows the school's logo (if one's been
+// uploaded) beside its name/address, consistently across all of them.
+function PrintHeader({ school, subtitle }) {
+  return (
+    <div style={{ textAlign:"center",marginBottom:16,borderBottom:"2px solid #e5e7eb",paddingBottom:16 }}>
+      {school?.logo && <img src={school.logo} alt="" style={{ width:60,height:60,objectFit:"contain",marginBottom:8 }}/>}
+      <div style={{ fontSize:18,fontWeight:700 }}>{school?.name}</div>
+      {school?.address && <div style={{ fontSize:12,color:"#64748b" }}>{school.address}</div>}
+      {(school?.phone||school?.email) && <div style={{ fontSize:12,color:"#64748b" }}>{[school.phone,school.email].filter(Boolean).join(" | ")}</div>}
+      {subtitle && <div style={{ fontSize:13,color:"#374151",marginTop:6 }}>{subtitle}</div>}
     </div>
   );
 }
@@ -732,7 +747,7 @@ export default function EduSmart() {
     attendance,setAttendance,fees,setFees,expenses,setExpenses,payroll,setPayroll,books,setBooks,borrows,setBorrows,
     nurseryLogs,setNurseryLogs,milestones,setMilestones,examSchedule,setExamSchedule,timetables,setTimetables,
     auditLog,setAuditLog,curUser,notify,addAudit,absentAlerts,feeAlerts,overdueBooks,noStock,unlockUser,failedLogins,
-    setSchool,licInfo,classes,setClasses,classLevels,setClassLevels,subjects,setSubjects,yearArchive,setYearArchive,
+    setSchool,licInfo,setLicInfo,setLicenced,classes,setClasses,classLevels,setClassLevels,subjects,setSubjects,yearArchive,setYearArchive,
     cloudSync };
 
   return (
@@ -1287,7 +1302,7 @@ function Students({ students,setStudents,notify,addAudit,curUser,classes,classLe
 }
 
 // ─── NURSERY / KG ────────────────────────────────────────────
-function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,curUser,notify,addAudit,classLevels,levelFilter,pageTitle,pageIcon }) {
+function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,curUser,notify,addAudit,classLevels,levelFilter,pageTitle,pageIcon,school }) {
   const [tab,setTab]=useState("daily");
   const [selStu,setSelStu]=useState("");
   const [selDate,setSelDate]=useState(todayStr());
@@ -1440,10 +1455,7 @@ function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,
 
       {selStu&&tab==="report"&&(
         <Card style={{ padding:24 }}>
-          <div style={{ textAlign:"center",marginBottom:16,borderBottom:"2px solid #e5e7eb",paddingBottom:16 }}>
-            <div style={{ fontSize:18,fontWeight:700 }}>🍼 KG Progress Report</div>
-            <div style={{ fontSize:13,color:"#64748b" }}>Child: <strong>{selStudent?.name}</strong> | Class: {selStudent?.class} | {selTerm} 2024/2025</div>
-          </div>
+          <PrintHeader school={school} subtitle={<>🍼 KG Progress Report<br/>Child: <strong>{selStudent?.name}</strong> | Class: {selStudent?.class} | {selTerm} 2024/2025</>}/>
           <div style={{ marginBottom:16 }}>
             <h4 style={{ margin:"0 0 10px",fontSize:14 }}>Daily Log Summary ({stuLogs.length} days recorded)</h4>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,fontSize:13 }}>
@@ -2295,6 +2307,7 @@ function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school
       {receipt&&(
         <Modal title="Payment Receipt" onClose={()=>setReceipt(null)}>
           <div style={{ textAlign:"center",marginBottom:16 }}>
+            {school.logo && <img src={school.logo} alt="" style={{ width:56,height:56,objectFit:"contain",marginBottom:6 }}/>}
             <div style={{ fontSize:20,fontWeight:700 }}>{school.name}</div>
             <div style={{ fontSize:12,color:"#64748b" }}>{school.address}</div>
             <div style={{ fontSize:12,color:"#64748b" }}>{school.phone} | {school.email}</div>
@@ -3003,7 +3016,10 @@ ${school.principalName||"The Principal"}`,
           <Card style={{ padding:18 }}>
             <h3 style={{ margin:"0 0 10px",fontSize:15 }}>Letter Preview</h3>
             {letterPreview?(
-              <pre style={{ background:"#fff",borderRadius:10,padding:16,fontSize:12,lineHeight:1.9,whiteSpace:"pre-wrap",margin:0,color:"#0f172a",maxHeight:450,overflowY:"auto",fontFamily:"'Courier New',monospace",border:"1px solid #e5e7eb" }}>{letterPreview}</pre>
+              <div>
+                {school.logo && <img src={school.logo} alt="" style={{ width:50,height:50,objectFit:"contain",display:"block",margin:"0 auto 8px" }}/>}
+                <pre style={{ background:"#fff",borderRadius:10,padding:16,fontSize:12,lineHeight:1.9,whiteSpace:"pre-wrap",margin:0,color:"#0f172a",maxHeight:450,overflowY:"auto",fontFamily:"'Courier New',monospace",border:"1px solid #e5e7eb" }}>{letterPreview}</pre>
+              </div>
             ):<div style={{ textAlign:"center",color:"#9ca3af",padding:40 }}>Select letter type and student, then preview</div>}
           </Card>
         </div>
@@ -3047,6 +3063,7 @@ function Reports({ students,grades,attendance,fees,expenses,school,classes,subje
             return (
               <Card className="report-card-print" style={{ padding:28 }}>
                 <div style={{ textAlign:"center",marginBottom:16,borderBottom:"2px solid #1e40af",paddingBottom:14 }}>
+                  {school.logo && <img src={school.logo} alt="" style={{ width:56,height:56,objectFit:"contain",marginBottom:6 }}/>}
                   <div style={{ fontSize:20,fontWeight:700,color:"#0f172a" }}>{school.name}</div>
                   <div style={{ fontSize:12,color:"#64748b" }}>{school.address} | {school.phone}</div>
                   <div style={{ fontSize:15,fontWeight:700,color:"#1e40af",marginTop:8 }}>ACADEMIC REPORT — {st} 2024/2025</div>
@@ -3261,9 +3278,12 @@ function IDCard({ person,type,school,roleColors }) {
   const bg=type==="staff"?(roleColors[person.role]||"#1e40af"):"#1e40af";
   return (
     <div className="id-card-print" style={{ width:300,borderRadius:14,overflow:"hidden",boxShadow:"0 4px 16px rgba(0,0,0,0.15)",fontFamily:"'Segoe UI',sans-serif" }}>
-      <div style={{ background:bg,padding:"14px 18px",color:"#fff" }}>
-        <div style={{ fontSize:14,fontWeight:700 }}>{school.name}</div>
-        <div style={{ fontSize:10,opacity:0.8 }}>{school.motto}</div>
+      <div style={{ background:bg,padding:"14px 18px",color:"#fff",display:"flex",alignItems:"center",gap:8 }}>
+        {school.logo && <img src={school.logo} alt="" style={{ width:28,height:28,objectFit:"contain",borderRadius:4,background:"#fff",padding:2,flexShrink:0 }}/>}
+        <div>
+          <div style={{ fontSize:14,fontWeight:700 }}>{school.name}</div>
+          <div style={{ fontSize:10,opacity:0.8 }}>{school.motto}</div>
+        </div>
       </div>
       <div style={{ background:"#fff",padding:"14px 18px",display:"flex",gap:12 }}>
         <div style={{ width:54,height:54,borderRadius:10,background:bg+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,flexShrink:0,overflow:"hidden" }}>
@@ -3366,7 +3386,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   nurseryLogs,setNurseryLogs,milestones,setMilestones,examSchedule,setExamSchedule,
   timetables,setTimetables,auditLog,setAuditLog,
   classes,setClasses,classLevels,setClassLevels,subjects,setSubjects,yearArchive,setYearArchive,
-  cloudSync }) {
+  cloudSync, setLicInfo, setLicenced }) {
   const [form,setForm]=useState({...school}); const [tab,setTab]=useState("school");
   const [resetId,setResetId]=useState(""); const [newPin,setNewPin]=useState("");
   const [importFile,setImportFile]=useState(null); const [importErr,setImportErr]=useState("");
@@ -3383,6 +3403,9 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   const [codeCopied,setCodeCopied]=useState(false);
   const [syncingNow,setSyncingNow]=useState(false);
   const [syncResult,setSyncResult]=useState("");
+  const [licKeyCopied,setLicKeyCopied]=useState(false);
+  const [newLicKeyInput,setNewLicKeyInput]=useState("");
+  const [newLicKeyErr,setNewLicKeyErr]=useState("");
 
   const save=()=>{ setSchool({...form}); addAudit("Updated school settings","Settings"); notify("Settings saved ✅"); };
 
@@ -3420,6 +3443,19 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
     if(!confirm("Turn off cloud sync on this device? Local data stays exactly as it is — this only stops syncing to/from the cloud.")) return;
     cloudSync.disable();
     notify("Cloud sync turned off for this device");
+  };
+
+  const handleUpdateLicenceKey=()=>{
+    const k = parseLicenceKey(newLicKeyInput);
+    if (!k) { setNewLicKeyErr("Invalid licence key. Check it and try again, or contact EduSmart support."); return; }
+    if (!k.lifetime && k.expiry && k.expiry < new Date()) { setNewLicKeyErr("This licence key has already expired. Please use a valid, unexpired key."); return; }
+    const newLicInfo = { type:k.type, expiry:k.lifetime?null:k.expiry?.toISOString().split("T")[0], lifetime:k.lifetime, key:newLicKeyInput.trim().toUpperCase() };
+    setLicInfo(newLicInfo);
+    setLicenced&&setLicenced(true);
+    setNewLicKeyErr(""); setNewLicKeyInput("");
+    cloudSync?.pushLicenceToCloud(newLicInfo);
+    addAudit("Licence key updated","Settings");
+    notify("Licence key saved ✅");
   };
 
   const handleSyncNow=async()=>{
@@ -3559,6 +3595,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
       {tab==="school"&&(
         <Card style={{ padding:24,maxWidth:580 }}>
           <h3 style={{ margin:"0 0 16px",fontSize:16 }}>School Profile (appears on all receipts, reports, ID cards)</h3>
+          <Row label="School Logo"><PhotoUpload value={form.logo||""} onChange={v=>setForm(p=>({...p,logo:v}))} size={80}/></Row>
           <Row label="School Name"><input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} style={inp}/></Row>
           <Row label="Address"><input value={form.address} onChange={e=>setForm(p=>({...p,address:e.target.value}))} style={inp}/></Row>
           <Row label="Phone"><input value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))} style={inp}/></Row>
@@ -3761,6 +3798,22 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
             <div><strong>Developer:</strong> Gilbert Oscar Prah</div>
             <div><strong>Contact:</strong> 0597147460 | eagleeyefx1@gmail.com</div>
           </div>
+
+          <div style={{ fontSize:12,fontWeight:600,color:"#374151",marginBottom:6 }}>Licence Key</div>
+          <div style={{ background:"#f8fafc",border:"1px solid #d1d5db",borderRadius:8,padding:10,fontFamily:"monospace",fontSize:12,wordBreak:"break-all",marginBottom:8 }}>
+            {licInfo?.key || "No key on file for this activation — enter your key below to store it."}
+          </div>
+          {licInfo?.key && (
+            <button onClick={()=>{ navigator.clipboard?.writeText(licInfo.key); setLicKeyCopied(true); setTimeout(()=>setLicKeyCopied(false),2000); }} style={{ ...btnS,width:"100%",marginBottom:16,background:licKeyCopied?"#dcfce7":undefined,color:licKeyCopied?"#166534":undefined }}>
+              {licKeyCopied?"✅ Copied!":"📋 Copy Licence Key"}
+            </button>
+          )}
+
+          <div style={{ fontSize:12,fontWeight:600,color:"#374151",marginBottom:6,marginTop:licInfo?.key?0:16 }}>{licInfo?.key ? "Enter a New Key (renew or upgrade)" : "Enter Your Licence Key"}</div>
+          <input value={newLicKeyInput} onChange={e=>setNewLicKeyInput(e.target.value.toUpperCase())} placeholder="EDU-XXXXX-XXXXX-XXXXX-XXXXX" style={{ ...inp,fontFamily:"monospace",fontSize:12 }}/>
+          {newLicKeyErr&&<p style={{ color:"#dc2626",fontSize:12,marginBottom:8 }}>{newLicKeyErr}</p>}
+          <button onClick={handleUpdateLicenceKey} style={{ ...btnP,width:"100%",marginBottom:16 }}>Save Licence Key</button>
+
           <h4 style={{ fontSize:14,margin:"0 0 10px" }}>Pricing</h4>
           {[["Basic","GH₵ 1,500/yr","1 school, full access"],["Pro","GH₵ 3,500/yr","Multiple branches, priority support"]].map(([n,p,d])=>(
             <div key={n} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #f1f5f9",fontSize:13 }}>
