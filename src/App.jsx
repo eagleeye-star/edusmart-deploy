@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "5.7.0";
+const APP_VERSION = "5.7.1";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -3153,6 +3153,17 @@ function Reports({ students,grades,attendance,fees,expenses,school,classes,subje
   const attRate=sid=>{ const all=attendance.filter(a=>a.studentId===sid); return all.length?Math.round(attendance.filter(a=>a.studentId===sid&&a.status==="Present").length/all.length*100):100; };
   const gradeColor=g=>g==="A"?"#16a34a":g==="B"?"#0369a1":g==="C"?"#d97706":"#dc2626";
 
+  // Moved out of the render tree — this was previously called inside an
+  // IIFE nested in JSX, which breaks React's Rules of Hooks (a hook can
+  // only be called at a component's top level, never inside a nested
+  // function). That was the actual cause of the whole app going blank:
+  // React throws when it detects a hook called somewhere it doesn't
+  // expect, and with no error boundary around it, the crash took out
+  // everything, not just this one tab.
+  const rankedClass = [...classStu].map(s=>({ ...s,av:avg(sg(s.id,st)),att:attRate(s.id) })).sort((a,b)=>b.av-a.av)
+    .map((s,i)=>({ ...s, position:i+1 }));
+  const classSort = useSort(rankedClass, "position");
+
   return (
     <div>
       <style>{`
@@ -3228,27 +3239,20 @@ function Reports({ students,grades,attendance,fees,expenses,school,classes,subje
             <select value={sc} onChange={e=>setSc(e.target.value)} style={{ ...inp,width:160 }}>{classes.map(c=><option key={c}>{c}</option>)}</select>
             <select value={st} onChange={e=>setSt(e.target.value)} style={{ ...inp,width:120 }}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
           </div>
-          {(() => {
-            const ranked = [...classStu].map(s=>({ ...s,av:avg(sg(s.id,st)),att:attRate(s.id) })).sort((a,b)=>b.av-a.av)
-              .map((s,i)=>({ ...s, position:i+1 }));
-            const classSort = useSort(ranked, "position");
-            return (
-              <Table cols={["#","Student","Avg Score","Grade","Attendance","Fees Status","Position"]}
-                colKeys={["position","name","av",null,"att",null,"position"]}
-                sortState={classSort}
-                rows={classSort.sorted.map((s)=>{ const i=s.position-1; return (
-                  <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9",background:i<3?"#fffbeb":"#fff" }}>
-                    <TD small color={i<3?"#d97706":"#9ca3af"}>{s.position}{i===0?"🥇":i===1?"🥈":i===2?"🥉":""}</TD>
-                    <TD bold>{s.name}</TD>
-                    <TD bold color={s.av>=70?"#16a34a":s.av>=50?"#d97706":"#dc2626"}>{s.av?s.av+"%":"No data"}</TD>
-                    <td style={{ padding:"8px 12px" }}>{s.av?<Badge text={calcGrade(s.av)} color={gradeColor(calcGrade(s.av))}/>:<span>-</span>}</td>
-                    <TD color={s.att>=80?"#16a34a":"#dc2626"} bold>{s.att}%</TD>
-                    <td style={{ padding:"8px 12px" }}>{s.fees-s.paid===0?<Badge text="Cleared ✅" color="#166534" bg="#dcfce7"/>:<Badge text={formatGHS(s.fees-s.paid)+" due"} color="#991b1b" bg="#fee2e2"/>}</td>
-                    <TD bold>{s.position}</TD>
-                  </tr>
-                );})} emptyMsg="No students in this class."/>
-            );
-          })()}
+          <Table cols={["#","Student","Avg Score","Grade","Attendance","Fees Status","Position"]}
+            colKeys={["position","name","av",null,"att",null,"position"]}
+            sortState={classSort}
+            rows={classSort.sorted.map((s)=>{ const i=s.position-1; return (
+              <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9",background:i<3?"#fffbeb":"#fff" }}>
+                <TD small color={i<3?"#d97706":"#9ca3af"}>{s.position}{i===0?"🥇":i===1?"🥈":i===2?"🥉":""}</TD>
+                <TD bold>{s.name}</TD>
+                <TD bold color={s.av>=70?"#16a34a":s.av>=50?"#d97706":"#dc2626"}>{s.av?s.av+"%":"No data"}</TD>
+                <td style={{ padding:"8px 12px" }}>{s.av?<Badge text={calcGrade(s.av)} color={gradeColor(calcGrade(s.av))}/>:<span>-</span>}</td>
+                <TD color={s.att>=80?"#16a34a":"#dc2626"} bold>{s.att}%</TD>
+                <td style={{ padding:"8px 12px" }}>{s.fees-s.paid===0?<Badge text="Cleared ✅" color="#166534" bg="#dcfce7"/>:<Badge text={formatGHS(s.fees-s.paid)+" due"} color="#991b1b" bg="#fee2e2"/>}</td>
+                <TD bold>{s.position}</TD>
+              </tr>
+            );})} emptyMsg="No students in this class."/>
         </div>
       )}
 
