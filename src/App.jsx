@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "5.6.1";
+const APP_VERSION = "5.7.0";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -101,9 +101,16 @@ const MILESTONE_RATINGS = ["Not Yet","Emerging","Developing","Achieved"];
 
 // ─── SEED DATA ────────────────────────────────────────────────
 const INITIAL_SCHOOL = {
-  name:"", address:"", phone:"", email:"", motto:"",
-  currentTerm:"Term 1", currentYear:"", principalName:"",
+  name:"", address:"", phone:"", email:"", motto:"", logo:"",
+  currentTerm:"Term 1", currentYear:"", principalName:"", termStartDate:"",
 };
+
+// A school that never touches Fee Types keeps working exactly like
+// before — one termly "Tuition" fee, matching the original single-fee
+// model, just expressed as the first (and only) entry in this list.
+const INITIAL_FEE_TYPES = [
+  { id:"FTY-DEFAULT", name:"Tuition", frequency:"termly", defaultAmount:500, scope:"all", active:true },
+];
 
 const INITIAL_USERS = []; // first-run wizard creates the initial Admin account
 
@@ -189,6 +196,64 @@ const calcCA    = ca  => Math.round((ca/30)*30);  // CA out of 30
 const calcExam  = ex  => Math.round((ex/70)*70);  // Exam out of 70
 const formatGHS = n   => `GH₵ ${Number(n||0).toFixed(2)}`;
 const todayStr  = ()  => new Date().toISOString().split("T")[0];
+
+// ─── FLEXIBLE FEE TYPES — calculation logic ─────────────────────
+// This is the exact logic tested in isolation (26 cases covering
+// every frequency, scoping, and exemption rule) before being embedded
+// here — see feeCalc.test.js in the sync project for the full test
+// suite this was validated against.
+function daysBetweenDates(a, b) {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.floor((b.setHours(0,0,0,0) - a.setHours(0,0,0,0)) / msPerDay);
+}
+function countSchoolDaysBetween(termStart, asOf) {
+  let count = 0;
+  const d = new Date(termStart); d.setHours(0,0,0,0);
+  const end = new Date(asOf); end.setHours(0,0,0,0);
+  while (d <= end) {
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+    d.setDate(d.getDate() + 1);
+  }
+  return count;
+}
+function countMonthsElapsedSince(termStart, asOf) {
+  const months = (asOf.getFullYear() - termStart.getFullYear()) * 12 + (asOf.getMonth() - termStart.getMonth());
+  return Math.max(1, months + 1);
+}
+function countWeeksElapsedSince(termStart, asOf) {
+  const days = daysBetweenDates(new Date(termStart), new Date(asOf));
+  return Math.max(1, Math.floor(days / 7) + 1);
+}
+function computeExpectedAmount(feeType, termStartDate, asOfDate = new Date()) {
+  if (!termStartDate) return feeType.defaultAmount || 0; // no term start set yet — fall back to a flat amount
+  const termStart = new Date(termStartDate);
+  const asOf = new Date(asOfDate);
+  if (isNaN(termStart.getTime()) || isNaN(asOf.getTime())) return feeType.defaultAmount || 0;
+  if (asOf < termStart) return 0;
+  const amount = feeType.defaultAmount || 0;
+  switch (feeType.frequency) {
+    case "daily":   return amount * countSchoolDaysBetween(new Date(termStart), new Date(asOf));
+    case "weekly":  return amount * countWeeksElapsedSince(new Date(termStart), new Date(asOf));
+    case "monthly": return amount * countMonthsElapsedSince(new Date(termStart), new Date(asOf));
+    case "termly": default: return amount;
+  }
+}
+function feeTypeAppliesToStudent(feeType, student) {
+  if (!feeType.active) return false;
+  if ((student.feeExemptions || []).includes(feeType.id)) return false;
+  if (!feeType.scope || feeType.scope === "all") return true;
+  return feeType.scope.split(",").map(c=>c.trim()).includes(student.class);
+}
+function computeStudentFeeBalances(student, feeTypes, payments, termStartDate) {
+  const applicable = feeTypes.filter(ft => feeTypeAppliesToStudent(ft, student));
+  return applicable.map(ft => {
+    const expected = computeExpectedAmount(ft, termStartDate);
+    const paid = payments.filter(p=>p.studentId===student.id && p.feeTypeId===ft.id).reduce((s,p)=>s+(p.paid||0),0);
+    return { feeTypeId:ft.id, name:ft.name, frequency:ft.frequency, expected, paid, balance:expected-paid };
+  });
+}
+
 const nowStr    = ()  => new Date().toLocaleString("en-GB");
 const uid       = pre => `${pre}${Date.now().toString().slice(-7)}`;
 
@@ -420,6 +485,7 @@ export default function EduSmart() {
   const [mockExams,  setMockExams]  = useState(persisted?.mockExams ?? INITIAL_MOCK_EXAMS);
   const [attendance, setAttendance] = useState(persisted?.attendance ?? INITIAL_ATTENDANCE);
   const [fees,       setFees]       = useState(persisted?.fees ?? INITIAL_FEES);
+  const [feeTypes,   setFeeTypes]   = useState(persisted?.feeTypes ?? INITIAL_FEE_TYPES);
   const [expenses,   setExpenses]   = useState(persisted?.expenses ?? INITIAL_EXPENSES);
   const [payroll,    setPayroll]    = useState(persisted?.payroll ?? INITIAL_PAYROLL);
   const [books,      setBooks]      = useState(persisted?.books ?? INITIAL_BOOKS);
@@ -441,8 +507,8 @@ export default function EduSmart() {
   // here so useCloudSync's internals can stay consistently keyed by
   // table name throughout.
   const cloudSync = useCloudSync({
-    appState: { students, attendance, grades, fees, staff: users, school },
-    appSetters: { students: setStudents, attendance: setAttendance, grades: setGrades, fees: setFees, staff: setUsers, school: setSchool },
+    appState: { students, attendance, grades, fees, staff: users, school, fee_types: feeTypes },
+    appSetters: { students: setStudents, attendance: setAttendance, grades: setGrades, fees: setFees, staff: setUsers, school: setSchool, fee_types: setFeeTypes },
   });
 
   // Save everything back to local storage shortly after any change.
@@ -452,14 +518,14 @@ export default function EduSmart() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       try {
-        const blob = { licenced, licInfo, school, users, students, grades, mockExams, attendance, fees,
+        const blob = { licenced, licInfo, school, users, students, grades, mockExams, attendance, fees, feeTypes,
           expenses, payroll, books, borrows, nurseryLogs, milestones, examSchedule, timetables,
           classes, classLevels, subjects, yearArchive, auditLog, failedLogins };
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(blob));
       } catch (e) { /* storage full or unavailable — data stays in memory for this session */ }
     }, 500);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [licenced, licInfo, school, users, students, grades, mockExams, attendance, fees, expenses,
+  }, [licenced, licInfo, school, users, students, grades, mockExams, attendance, fees, feeTypes, expenses,
       payroll, books, borrows, nurseryLogs, milestones, examSchedule, timetables,
       classes, classLevels, subjects, yearArchive, auditLog, failedLogins]);
 
@@ -687,7 +753,10 @@ export default function EduSmart() {
     const sAtt = attendance.filter(a=>a.studentId===s.id).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3);
     return sAtt.length>=3 && sAtt.every(a=>a.status==="Absent");
   });
-  const feeAlerts   = activeStudents.filter(s=>s.fees-s.paid>0);
+  const feeAlerts   = activeStudents.filter(s=>{
+    const balances = computeStudentFeeBalances(s, feeTypes.filter(ft=>ft.active), fees, school.termStartDate);
+    return balances.some(b=>b.balance>0);
+  });
   const overdueBooks= borrows.filter(b=>!b.returnDate&&b.dueDate<todayStr());
   const noStock     = books.filter(b=>b.available===0);
 
@@ -744,7 +813,7 @@ export default function EduSmart() {
   const alertCount = absentAlerts.length + overdueBooks.length;
 
   const sharedProps = { school,students,setStudents,users,setUsers,grades,setGrades,mockExams,setMockExams,
-    attendance,setAttendance,fees,setFees,expenses,setExpenses,payroll,setPayroll,books,setBooks,borrows,setBorrows,
+    attendance,setAttendance,fees,setFees,feeTypes,setFeeTypes,expenses,setExpenses,payroll,setPayroll,books,setBooks,borrows,setBorrows,
     nurseryLogs,setNurseryLogs,milestones,setMilestones,examSchedule,setExamSchedule,timetables,setTimetables,
     auditLog,setAuditLog,curUser,notify,addAudit,absentAlerts,feeAlerts,overdueBooks,noStock,unlockUser,failedLogins,
     setSchool,licInfo,setLicInfo,setLicenced,classes,setClasses,classLevels,setClassLevels,subjects,setSubjects,yearArchive,setYearArchive,
@@ -1014,7 +1083,7 @@ function FirstRunWizard({ onComplete, licInfo, cloudSync, notify }) {
 }
 
 
-function Dashboard({ school,students,fees,expenses,attendance,grades,books,borrows,users,curUser,absentAlerts,feeAlerts,overdueBooks,noStock,payroll,examSchedule,mockExams }) {
+function Dashboard({ school,students,fees,expenses,attendance,grades,books,borrows,users,curUser,absentAlerts,feeAlerts,overdueBooks,noStock,payroll,examSchedule,mockExams,feeTypes }) {
   if (curUser?.role === "Teacher") {
     return <TeacherDashboard school={school} students={students} grades={grades} attendance={attendance}
       examSchedule={examSchedule} mockExams={mockExams} curUser={curUser}/>;
@@ -1087,12 +1156,15 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
         </Card>
         <Card style={{ padding:18 }}>
           <h3 style={{ margin:"0 0 12px",fontSize:15,color:"#0f172a" }}>💸 Fee Arrears</h3>
-          {feeAlerts.slice(0,6).map(s=>(
+          {feeAlerts.slice(0,6).map(s=>{
+            const balances = computeStudentFeeBalances(s, (feeTypes||[]).filter(ft=>ft.active), fees, school.termStartDate);
+            const totalOwed = balances.reduce((sum,b)=>sum+Math.max(0,b.balance),0);
+            return (
             <div key={s.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f1f5f9",fontSize:13 }}>
               <span>{s.name} <span style={{ color:"#9ca3af",fontSize:11 }}>({s.class})</span></span>
-              <span style={{ color:"#dc2626",fontWeight:600 }}>{formatGHS(s.fees-s.paid)}</span>
+              <span style={{ color:"#dc2626",fontWeight:600 }}>{formatGHS(totalOwed)}</span>
             </div>
-          ))}
+          );})}
           {feeAlerts.length===0&&<p style={{ color:"#16a34a",fontSize:13 }}>✅ All fees cleared!</p>}
         </Card>
       </div>
@@ -1206,10 +1278,10 @@ function TeacherDashboard({ school,students,grades,attendance,examSchedule,mockE
 }
 
 
-function Students({ students,setStudents,notify,addAudit,curUser,classes,classLevels,initialSearch,cloudSync }) {
+function Students({ students,setStudents,notify,addAudit,curUser,classes,classLevels,initialSearch,cloudSync,feeTypes }) {
   const [search,setSearch]=useState(initialSearch||""); const [fc,setFc]=useState(""); const [fs,setFs]=useState("all");
   const [showForm,setShowForm]=useState(false); const [editId,setEditId]=useState(null);
-  const blank = { name:"",class:"Class 1A",dob:"",gender:"Male",guardian:"",phone:"",fees:500,paid:0,status:"active",section:"primary",photo:"" };
+  const blank = { name:"",class:"Class 1A",dob:"",gender:"Male",guardian:"",phone:"",fees:500,paid:0,status:"active",section:"primary",photo:"",feeExemptions:[] };
   const [form,setForm]=useState(blank);
 
   const filtered = students.filter(s=>{
@@ -1267,6 +1339,19 @@ function Students({ students,setStudents,notify,addAudit,curUser,classes,classLe
           <Row label="Guardian Phone"><input value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))} style={inp}/></Row>
           <Row label="Fees (GH₵)"><input type="number" value={form.fees} onChange={e=>setForm(p=>({...p,fees:+e.target.value}))} style={inp}/></Row>
           <Row label="Amount Paid (GH₵)"><input type="number" value={form.paid} onChange={e=>setForm(p=>({...p,paid:+e.target.value}))} style={inp}/></Row>
+          {feeTypes&&feeTypes.filter(ft=>ft.active&&(ft.scope==="all"||ft.scope.split(",").map(c=>c.trim()).includes(form.class))).length>0 && (
+            <Row label="Fee Exemptions">
+              <div style={{ background:"#f8fafc",borderRadius:8,padding:10 }}>
+                {feeTypes.filter(ft=>ft.active&&(ft.scope==="all"||ft.scope.split(",").map(c=>c.trim()).includes(form.class))).map(ft=>(
+                  <label key={ft.id} style={{ display:"flex",alignItems:"center",gap:6,fontSize:12,padding:"3px 0",cursor:"pointer" }}>
+                    <input type="checkbox" checked={(form.feeExemptions||[]).includes(ft.id)}
+                      onChange={e=>setForm(p=>({...p,feeExemptions:e.target.checked?[...(p.feeExemptions||[]),ft.id]:(p.feeExemptions||[]).filter(id=>id!==ft.id)}))}/>
+                    Exempt from {ft.name}
+                  </label>
+                ))}
+              </div>
+            </Row>
+          )}
           <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:16 }}>
             <button onClick={()=>{setShowForm(false);setEditId(null);}} style={btnS}>Cancel</button>
             <button onClick={save} style={btnP}>Save</button>
@@ -1291,7 +1376,7 @@ function Students({ students,setStudents,notify,addAudit,curUser,classes,classLe
               <Badge text={s.status} color={s.status==="active"?"#166534":s.status==="graduated"?"#1d4ed8":"#991b1b"} bg={s.status==="active"?"#dcfce7":s.status==="graduated"?"#dbeafe":"#fee2e2"}/>
             </td>
             <td style={{ padding:"8px 12px",display:"flex",gap:4 }}>
-              <button onClick={()=>{setEditId(s.id);setForm({name:s.name,class:s.class,dob:s.dob||"",gender:s.gender,guardian:s.guardian,phone:s.phone,fees:s.fees,paid:s.paid,status:s.status,photo:s.photo||""});setShowForm(true);}} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8" }}>Edit</button>
+              <button onClick={()=>{setEditId(s.id);setForm({name:s.name,class:s.class,dob:s.dob||"",gender:s.gender,guardian:s.guardian,phone:s.phone,fees:s.fees,paid:s.paid,status:s.status,photo:s.photo||"",feeExemptions:s.feeExemptions||[]});setShowForm(true);}} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8" }}>Edit</button>
               {s.status==="active"&&<button onClick={()=>{if(confirm(`Mark ${s.name} as dropout?`)){setStudents(p=>p.map(x=>x.id===s.id?{...x,status:"dropout"}:x));addAudit(`Dropout: ${s.name}`,"Students");notify("Moved to archive");}}} style={{ ...btnSm,background:"#fee2e2",color:"#991b1b" }}>Dropout</button>}
             </td>
           </tr>
@@ -2242,11 +2327,11 @@ function Attendance({ attendance,setAttendance,students,curUser,notify,addAudit,
 }
 
 // ─── FINANCE ─────────────────────────────────────────────────
-function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school,curUser,notify,addAudit,cloudSync }) {
+function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school,curUser,notify,addAudit,cloudSync,feeTypes }) {
   const [tab,setTab]=useState("fees");
   const [receipt,setReceipt]=useState(null);
   const [showFee,setShowFee]=useState(false); const [showExp,setShowExp]=useState(false);
-  const [feeForm,setFeeForm]=useState({ studentId:"",amount:"",paid:"",term:"Term 2",year:"2024/2025" });
+  const [feeForm,setFeeForm]=useState({ studentId:"",feeTypeId:feeTypes?.[0]?.id||"",paid:"",term:school.currentTerm||"Term 2",year:school.currentYear||"2024/2025" });
   const [expForm,setExpForm]=useState({ description:"",amount:"",category:"Supplies",date:todayStr() });
   const [period,setPeriod]=useState("monthly");
   const feesEnriched = fees.map(f=>({ ...f, studentName: students.find(x=>x.id===f.studentId)?.name, className: students.find(x=>x.id===f.studentId)?.class }));
@@ -2254,21 +2339,29 @@ function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school
   const expensesSort = useSort(expenses, "date", "desc");
 
   const saveFee=()=>{
-    if(!feeForm.studentId||!feeForm.paid){ notify("Student and amount required","error"); return; }
+    if(!feeForm.studentId||!feeForm.paid||!feeForm.feeTypeId){ notify("Student, fee type, and amount required","error"); return; }
     const stu=students.find(s=>s.id===feeForm.studentId);
-    const rec={ id:uid("FEE"),studentId:feeForm.studentId,amount:+feeForm.amount||+feeForm.paid,paid:+feeForm.paid,
-      balance:(+feeForm.amount||+feeForm.paid)-(+feeForm.paid),term:feeForm.term,year:feeForm.year,
+    const feeType=feeTypes.find(ft=>ft.id===feeForm.feeTypeId);
+    const expectedAmount = feeType ? computeExpectedAmount(feeType, school.termStartDate) : +feeForm.paid;
+    const rec={ id:uid("FEE"),studentId:feeForm.studentId,feeTypeId:feeForm.feeTypeId,amount:expectedAmount,paid:+feeForm.paid,
+      balance:expectedAmount-(+feeForm.paid),term:feeForm.term,year:feeForm.year,
       receiptNo:`RCP${Date.now().toString().slice(-5)}`,date:todayStr(),enteredBy:curUser.code };
     setFees(p=>[...p,rec]);
     cloudSync?.writeThrough("fees", rec);
-    if (stu) {
+    // Keep the legacy student.fees/paid pair working exactly as before,
+    // but only for the original default fee type — every other fee
+    // type's balance lives purely in the fees transaction log via
+    // computeStudentFeeBalances(), so schools with just one fee type
+    // (the vast majority, unchanged from before this feature existed)
+    // see no difference at all.
+    if (stu && feeForm.feeTypeId==="FTY-DEFAULT") {
       const updatedStudent = {...stu, paid: stu.paid+(+feeForm.paid)};
       setStudents&&setStudents(p=>p.map(s=>s.id===feeForm.studentId?updatedStudent:s));
       cloudSync?.writeThrough("students", updatedStudent);
     }
-    addAudit(`Fee: ${stu?.name} ${formatGHS(+feeForm.paid)}`,"Finance");
-    setReceipt({...rec,studentName:stu?.name,studentClass:stu?.class,guardian:stu?.guardian});
-    setShowFee(false); setFeeForm({studentId:"",amount:"",paid:"",term:"Term 2",year:"2024/2025"}); notify("Payment recorded ✅");
+    addAudit(`Fee: ${stu?.name} ${formatGHS(+feeForm.paid)} (${feeType?.name||"Fee"})`,"Finance");
+    setReceipt({...rec,studentName:stu?.name,studentClass:stu?.class,guardian:stu?.guardian,feeTypeName:feeType?.name});
+    setShowFee(false); setFeeForm({studentId:"",feeTypeId:feeTypes?.[0]?.id||"",paid:"",term:school.currentTerm||"Term 2",year:school.currentYear||"2024/2025"}); notify("Payment recorded ✅");
   };
 
   const saveExp=()=>{
@@ -2280,6 +2373,11 @@ function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school
 
   const totalPaid=fees.reduce((a,f)=>a+f.paid,0);
   const totalExp=expenses.reduce((a,e)=>a+e.amount,0);
+  const activeFeeTypes = (feeTypes||[]).filter(ft=>ft.active);
+  const totalOutstanding = students.filter(s=>s.status==="active").reduce((sum,s)=>{
+    const balances = computeStudentFeeBalances(s, activeFeeTypes, fees, school.termStartDate);
+    return sum + balances.reduce((s2,b)=>s2+Math.max(0,b.balance),0);
+  }, 0);
 
   const getReport=()=>{
     const now=new Date();
@@ -2320,6 +2418,7 @@ function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school
             <div><strong>Student:</strong> {receipt.studentName}</div>
             <div><strong>Class:</strong> {receipt.studentClass}</div>
             <div><strong>Guardian:</strong> {receipt.guardian}</div>
+            <div><strong>Fee:</strong> {receipt.feeTypeName||"Tuition"}</div>
             <div><strong>Term:</strong> {receipt.term} — {receipt.year}</div>
             <div><strong>Date:</strong> {receipt.date}</div>
             <div style={{ borderTop:"1px solid #e5e7eb",marginTop:6,paddingTop:6 }}>
@@ -2341,17 +2440,31 @@ function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
             <div style={{ display:"flex",gap:10 }}>
               <StatCard icon="💰" label="Total Collected" value={formatGHS(totalPaid)} color="#16a34a"/>
-              <StatCard icon="⚠️" label="Outstanding" value={formatGHS(students.filter(s=>s.status==="active").reduce((a,s)=>a+(s.fees-s.paid),0))} color="#dc2626"/>
+              <StatCard icon="⚠️" label="Outstanding" value={formatGHS(totalOutstanding)} color="#dc2626"/>
             </div>
             <button onClick={()=>setShowFee(true)} style={btnP}>+ Record Payment</button>
           </div>
           {showFee&&(
             <Modal title="Record Fee Payment" onClose={()=>setShowFee(false)}>
+              <Row label="Which Fee?"><select value={feeForm.feeTypeId} onChange={e=>setFeeForm(p=>({...p,feeTypeId:e.target.value}))} style={inp}>
+                {activeFeeTypes.map(ft=><option key={ft.id} value={ft.id}>{ft.name} ({ft.frequency})</option>)}
+              </select></Row>
               <Row label="Student"><select value={feeForm.studentId} onChange={e=>setFeeForm(p=>({...p,studentId:e.target.value}))} style={inp}>
                 <option value="">Select</option>
-                {students.filter(s=>s.status==="active").map(s=><option key={s.id} value={s.id}>{s.name} — {s.class} (Bal: {formatGHS(s.fees-s.paid)})</option>)}
+                {students.filter(s=>s.status==="active"&&feeTypeAppliesToStudent(feeTypes.find(ft=>ft.id===feeForm.feeTypeId)||{},s)).map(s=><option key={s.id} value={s.id}>{s.name} — {s.class}</option>)}
               </select></Row>
-              <Row label="Total Fees (GH₵)"><input type="number" value={feeForm.amount} onChange={e=>setFeeForm(p=>({...p,amount:e.target.value}))} style={inp}/></Row>
+              {feeForm.studentId && feeForm.feeTypeId && (()=>{
+                const stu = students.find(s=>s.id===feeForm.studentId);
+                const ft = feeTypes.find(f=>f.id===feeForm.feeTypeId);
+                if (!stu || !ft) return null;
+                const balances = computeStudentFeeBalances(stu, [ft], fees, school.termStartDate);
+                const b = balances[0];
+                return b ? (
+                  <div style={{ background:"#f0f9ff",borderRadius:8,padding:10,fontSize:12,marginBottom:12 }}>
+                    Expected so far this term: <strong>{formatGHS(b.expected)}</strong> · Already paid: <strong>{formatGHS(b.paid)}</strong> · Balance: <strong style={{color:b.balance>0?"#dc2626":"#16a34a"}}>{formatGHS(b.balance)}</strong>
+                  </div>
+                ) : null;
+              })()}
               <Row label="Amount Paying Now (GH₵)"><input type="number" value={feeForm.paid} onChange={e=>setFeeForm(p=>({...p,paid:e.target.value}))} style={inp}/></Row>
               <Row label="Term"><select value={feeForm.term} onChange={e=>setFeeForm(p=>({...p,term:e.target.value}))} style={inp}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select></Row>
               <Row label="Year"><input value={feeForm.year} onChange={e=>setFeeForm(p=>({...p,year:e.target.value}))} style={inp}/></Row>
@@ -2361,13 +2474,14 @@ function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school
               </div>
             </Modal>
           )}
-          <Table cols={["Receipt","Student","Class","Amount","Paid","Balance","Term","Date","By"]}
-            colKeys={["receiptNo","studentName","className","amount","paid","balance","term","date","enteredBy"]}
+          <Table cols={["Receipt","Student","Class","Fee Type","Amount","Paid","Balance","Term","Date","By"]}
+            colKeys={["receiptNo","studentName","className",null,"amount","paid","balance","term","date","enteredBy"]}
             sortState={feesSort}
-            rows={feesSort.sorted.map(f=>{ const s=students.find(x=>x.id===f.studentId); return (
+            rows={feesSort.sorted.map(f=>{ const s=students.find(x=>x.id===f.studentId); const ft=feeTypes.find(t=>t.id===f.feeTypeId); return (
               <tr key={f.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
                 <TD small color="#6b7280">{f.receiptNo}</TD>
                 <TD bold>{s?.name}</TD><TD small>{s?.class}</TD>
+                <TD small>{ft?.name||"Tuition"}</TD>
                 <TD>{formatGHS(f.amount)}</TD>
                 <TD color="#16a34a" bold>{formatGHS(f.paid)}</TD>
                 <TD color={f.balance>0?"#dc2626":"#16a34a"} bold>{formatGHS(f.balance)}</TD>
@@ -3029,7 +3143,7 @@ ${school.principalName||"The Principal"}`,
 }
 
 // ─── REPORTS ─────────────────────────────────────────────────
-function Reports({ students,grades,attendance,fees,expenses,school,classes,subjects }) {
+function Reports({ students,grades,attendance,fees,expenses,school,classes,subjects,feeTypes }) {
   const [rt,setRt]=useState("student");
   const [sc,setSc]=useState(classes[5]); const [ss,setSs]=useState(""); const [st,setSt]=useState("Term 1");
 
@@ -3199,6 +3313,37 @@ function Reports({ students,grades,attendance,fees,expenses,school,classes,subje
               })}
             </Card>
           </div>
+
+          {feeTypes&&feeTypes.length>1&&(
+            <Card style={{ padding:18,marginTop:16 }}>
+              <h3 style={{ margin:"0 0 12px",fontSize:15 }}>Fee Collection by Type</h3>
+              <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
+                <thead><tr style={{ borderBottom:"2px solid #e5e7eb",textAlign:"left" }}>
+                  <th style={{ padding:"6px 4px" }}>Fee Type</th><th style={{ padding:"6px 4px" }}>Frequency</th>
+                  <th style={{ padding:"6px 4px" }}>Collected</th><th style={{ padding:"6px 4px" }}>Outstanding</th><th style={{ padding:"6px 4px" }}>Payments</th>
+                </tr></thead>
+                <tbody>
+                  {feeTypes.filter(ft=>ft.active).map(ft=>{
+                    const ftPayments = fees.filter(f=>f.feeTypeId===ft.id);
+                    const collected = ftPayments.reduce((s,f)=>s+f.paid,0);
+                    const applicableStudents = students.filter(s=>s.status==="active"&&feeTypeAppliesToStudent(ft,s));
+                    const outstanding = applicableStudents.reduce((sum,s)=>{
+                      const bal = computeStudentFeeBalances(s,[ft],fees,school.termStartDate)[0];
+                      return sum+(bal?Math.max(0,bal.balance):0);
+                    },0);
+                    return (
+                      <tr key={ft.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                        <TD bold>{ft.name}</TD><TD small>{ft.frequency}</TD>
+                        <TD color="#16a34a" bold>{formatGHS(collected)}</TD>
+                        <TD color={outstanding>0?"#dc2626":"#16a34a"} bold>{formatGHS(outstanding)}</TD>
+                        <TD small>{ftPayments.length}</TD>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </Card>
+          )}
         </div>
       )}
     </div>
@@ -3382,7 +3527,7 @@ function AuditLog({ auditLog,users }) {
 // ─── SETTINGS ────────────────────────────────────────────────
 function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   students,setStudents,grades,setGrades,mockExams,setMockExams,attendance,setAttendance,
-  fees,setFees,expenses,setExpenses,payroll,setPayroll,books,setBooks,borrows,setBorrows,
+  fees,setFees,feeTypes,setFeeTypes,expenses,setExpenses,payroll,setPayroll,books,setBooks,borrows,setBorrows,
   nurseryLogs,setNurseryLogs,milestones,setMilestones,examSchedule,setExamSchedule,
   timetables,setTimetables,auditLog,setAuditLog,
   classes,setClasses,classLevels,setClassLevels,subjects,setSubjects,yearArchive,setYearArchive,
@@ -3516,9 +3661,41 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
     addAudit(`Removed subject: ${sub}`,"Settings"); notify("Subject removed");
   };
 
+  const [newFeeType,setNewFeeType]=useState({ name:"",frequency:"termly",defaultAmount:"",scopeMode:"all",scopeClasses:[] });
+  const [editingFeeTypeId,setEditingFeeTypeId]=useState(null);
+
+  const addFeeType=()=>{
+    if(!newFeeType.name.trim()){ notify("Enter a fee name","error"); return; }
+    if(!newFeeType.defaultAmount||+newFeeType.defaultAmount<=0){ notify("Enter a valid amount","error"); return; }
+    const scope = newFeeType.scopeMode==="all" ? "all" : newFeeType.scopeClasses.join(",");
+    if(newFeeType.scopeMode==="specific" && !scope){ notify("Select at least one class, or choose \"All Classes\"","error"); return; }
+    const ft = { id:uid("FTY"), name:newFeeType.name.trim(), frequency:newFeeType.frequency, defaultAmount:+newFeeType.defaultAmount, scope, active:true };
+    setFeeTypes(p=>[...p,ft]);
+    cloudSync?.writeThrough("fee_types", ft);
+    addAudit(`Added fee type: ${ft.name} (${ft.frequency})`,"Settings"); notify(`"${ft.name}" added ✅`);
+    setNewFeeType({ name:"",frequency:"termly",defaultAmount:"",scopeMode:"all",scopeClasses:[] });
+  };
+
+  const toggleFeeTypeActive=(id)=>{
+    const updated = feeTypes.find(f=>f.id===id);
+    if(!updated) return;
+    const newFt = {...updated, active:!updated.active};
+    setFeeTypes(p=>p.map(f=>f.id===id?newFt:f));
+    cloudSync?.writeThrough("fee_types", newFt);
+    addAudit(`${newFt.active?"Reactivated":"Retired"} fee type: ${newFt.name}`,"Settings");
+  };
+
+  const removeFeeType=(id)=>{
+    const ft = feeTypes.find(f=>f.id===id);
+    const inUse = fees.some(f=>f.feeTypeId===id);
+    if(inUse){ notify("Can't remove a fee type with existing payment records — retire it instead.","error"); return; }
+    setFeeTypes(p=>p.filter(f=>f.id!==id));
+    addAudit(`Removed fee type: ${ft?.name}`,"Settings"); notify("Fee type removed");
+  };
+
   const exportData=()=>{
-    const data={ version:"5.3", exportDate:nowStr(),
-      school,users,students,grades,mockExams,attendance,fees,expenses,payroll,books,borrows,
+    const data={ version:"5.6", exportDate:nowStr(),
+      school,users,students,grades,mockExams,attendance,fees,feeTypes,expenses,payroll,books,borrows,
       nurseryLogs,milestones,examSchedule,timetables,auditLog,classes,classLevels,subjects,yearArchive };
     const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
     const url=URL.createObjectURL(blob);
@@ -3549,6 +3726,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
     if(d.mockExams) setMockExams(d.mockExams);
     if(d.attendance) setAttendance(d.attendance);
     if(d.fees) setFees(d.fees);
+    if(d.feeTypes) setFeeTypes(d.feeTypes);
     if(d.expenses) setExpenses(d.expenses);
     if(d.payroll) setPayroll(d.payroll);
     if(d.books) setBooks(d.books);
@@ -3577,6 +3755,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
       cloudSync.writeThroughBulk("grades", d.grades||[]);
       cloudSync.writeThroughBulk("fees", d.fees||[]);
       cloudSync.writeThroughBulk("staff", d.users||[]);
+      cloudSync.writeThroughBulk("fee_types", d.feeTypes||[]);
       notify("Backup restored ✅ — syncing to the cloud in the background");
     } else {
       notify("Backup restored ✅");
@@ -3590,7 +3769,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   return (
     <div>
       <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>⚙️ Settings</h2>
-      <Tabs tabs={[{key:"school",label:"🏫 School Profile"},{key:"classes",label:"🏷️ Classes & Subjects"},{key:"security",label:"🔐 Security"},{key:"data",label:"💾 Data & Backup"},{key:"cloud",label:"☁️ Cloud Sync"},{key:"licence",label:"🔑 Licence"}]} active={tab} onChange={setTab}/>
+      <Tabs tabs={[{key:"school",label:"🏫 School Profile"},{key:"classes",label:"🏷️ Classes & Subjects"},{key:"feetypes",label:"💵 Fee Types"},{key:"security",label:"🔐 Security"},{key:"data",label:"💾 Data & Backup"},{key:"cloud",label:"☁️ Cloud Sync"},{key:"licence",label:"🔑 Licence"}]} active={tab} onChange={setTab}/>
 
       {tab==="school"&&(
         <Card style={{ padding:24,maxWidth:580 }}>
@@ -3606,6 +3785,8 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
             <Row label="Current Term"><select value={form.currentTerm} onChange={e=>setForm(p=>({...p,currentTerm:e.target.value}))} style={inp}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select></Row>
             <Row label="Academic Year"><input value={form.currentYear} onChange={e=>setForm(p=>({...p,currentYear:e.target.value}))} style={inp}/></Row>
           </div>
+          <Row label="Term Start Date"><input type="date" value={form.termStartDate||""} onChange={e=>setForm(p=>({...p,termStartDate:e.target.value}))} style={inp}/></Row>
+          <p style={{ fontSize:11,color:"#94a3b8",marginTop:-8,marginBottom:12 }}>Only needed if you use daily, weekly, or monthly fees (Settings → Fee Types) — this is what those balances count from. Update it at the start of each new term.</p>
           <button onClick={save} style={{ ...btnP,marginTop:16 }}>Save Settings</button>
         </Card>
       )}
@@ -3643,6 +3824,63 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
                 <div key={sub} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f1f5f9",fontSize:13 }}>
                   <span>{sub}</span>
                   <button onClick={()=>removeSubject(sub)} style={{ ...btnSm,background:"#fee2e2",color:"#991b1b" }}>Remove</button>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {tab==="feetypes"&&(
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
+          <Card style={{ padding:22 }}>
+            <h3 style={{ margin:"0 0 6px",fontSize:16 }}>Add a Fee Type</h3>
+            <p style={{ fontSize:12,color:"#64748b",marginBottom:14 }}>A school that only charges standard tuition never needs more than the default "Tuition" entry already here. Add more for PTA dues, feeding, bus fare — each on its own schedule.</p>
+            <Row label="Name"><input value={newFeeType.name} onChange={e=>setNewFeeType(p=>({...p,name:e.target.value}))} placeholder="e.g. Bus Fare" style={inp}/></Row>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <Row label="How Often"><select value={newFeeType.frequency} onChange={e=>setNewFeeType(p=>({...p,frequency:e.target.value}))} style={inp}>
+                <option value="termly">Per Term</option><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="daily">Daily</option>
+              </select></Row>
+              <Row label="Amount (GH₵)"><input type="number" value={newFeeType.defaultAmount} onChange={e=>setNewFeeType(p=>({...p,defaultAmount:e.target.value}))} style={inp}/></Row>
+            </div>
+            <Row label="Who Pays This">
+              <div style={{ display:"flex",gap:8,marginBottom:8 }}>
+                <button onClick={()=>setNewFeeType(p=>({...p,scopeMode:"all"}))} style={{ ...btnSm,flex:1,background:newFeeType.scopeMode==="all"?"#1e40af":"#f1f5f9",color:newFeeType.scopeMode==="all"?"#fff":"#374151" }}>All Classes</button>
+                <button onClick={()=>setNewFeeType(p=>({...p,scopeMode:"specific"}))} style={{ ...btnSm,flex:1,background:newFeeType.scopeMode==="specific"?"#1e40af":"#f1f5f9",color:newFeeType.scopeMode==="specific"?"#fff":"#374151" }}>Specific Classes</button>
+              </div>
+            </Row>
+            {newFeeType.scopeMode==="specific"&&(
+              <div style={{ maxHeight:140,overflowY:"auto",background:"#f8fafc",borderRadius:8,padding:10,marginBottom:12 }}>
+                {classes.map(cls=>(
+                  <label key={cls} style={{ display:"flex",alignItems:"center",gap:6,fontSize:12,padding:"3px 0",cursor:"pointer" }}>
+                    <input type="checkbox" checked={newFeeType.scopeClasses.includes(cls)}
+                      onChange={e=>setNewFeeType(p=>({...p,scopeClasses:e.target.checked?[...p.scopeClasses,cls]:p.scopeClasses.filter(c=>c!==cls)}))}/>
+                    {cls}
+                  </label>
+                ))}
+              </div>
+            )}
+            <p style={{ fontSize:11,color:"#94a3b8",marginBottom:10 }}>Individual students can be marked exempt from a specific fee on their own profile (Students → edit student) — for example, one of two siblings who doesn't take the bus.</p>
+            <button onClick={addFeeType} style={{ ...btnP,width:"100%" }}>+ Add Fee Type</button>
+          </Card>
+
+          <Card style={{ padding:22 }}>
+            <h3 style={{ margin:"0 0 14px",fontSize:16 }}>Current Fee Types</h3>
+            <div style={{ maxHeight:480,overflowY:"auto" }}>
+              {feeTypes.map(ft=>(
+                <div key={ft.id} style={{ padding:"10px 0",borderBottom:"1px solid #f1f5f9" }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <div>
+                      <span style={{ fontWeight:600,fontSize:13,opacity:ft.active?1:0.5 }}>{ft.name}</span>{" "}
+                      <Badge text={ft.frequency} color="#1d4ed8" bg="#dbeafe"/>{" "}
+                      {!ft.active&&<Badge text="Retired" color="#991b1b" bg="#fee2e2"/>}
+                    </div>
+                    <div style={{ display:"flex",gap:6 }}>
+                      <button onClick={()=>toggleFeeTypeActive(ft.id)} style={{ ...btnSm,background:ft.active?"#fef3c7":"#dcfce7",color:ft.active?"#92400e":"#166534" }}>{ft.active?"Retire":"Reactivate"}</button>
+                      <button onClick={()=>removeFeeType(ft.id)} style={{ ...btnSm,background:"#fee2e2",color:"#991b1b" }}>Remove</button>
+                    </div>
+                  </div>
+                  <div style={{ fontSize:11,color:"#64748b",marginTop:2 }}>{formatGHS(ft.defaultAmount)} · {ft.scope==="all"?"All classes":ft.scope}</div>
                 </div>
               ))}
             </div>

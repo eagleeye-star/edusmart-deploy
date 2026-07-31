@@ -38,10 +38,11 @@ function stripLocalFields(payload) {
 // behind also changing student_id/entered_by from uuid to text.
 const FIELD_MAPS = {
   staff:      { classAssigned: "class_assigned", photo: "photo_url" },
-  students:   { photo: "photo_url" },
+  students:   { photo: "photo_url", feeExemptions: "fee_exemptions" },
   attendance: { studentId: "student_id", enteredBy: "entered_by" },
   grades:     { studentId: "student_id", enteredBy: "entered_by" },
-  fees:       { studentId: "student_id", enteredBy: "entered_by", receiptNo: "receipt_no" },
+  fees:       { studentId: "student_id", enteredBy: "entered_by", receiptNo: "receipt_no", feeTypeId: "fee_type_id" },
+  fee_types:  { defaultAmount: "default_amount" },
 };
 
 function toDbFields(table, obj) {
@@ -148,7 +149,7 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
       return {
         name: data.name, address: data.address, phone: data.phone, email: data.email,
         motto: data.motto, currentTerm: data.current_term, currentYear: data.current_year,
-        principalName: data.principal_name, logo: data.logo_url,
+        principalName: data.principal_name, logo: data.logo_url, termStartDate: data.term_start_date,
       };
     },
 
@@ -160,7 +161,7 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
       const { error } = await supabaseClient.from("schools").update({
         address: schoolInfo.address, phone: schoolInfo.phone, email: schoolInfo.email,
         motto: schoolInfo.motto, current_term: schoolInfo.currentTerm, current_year: schoolInfo.currentYear,
-        principal_name: schoolInfo.principalName, logo_url: schoolInfo.logo,
+        principal_name: schoolInfo.principalName, logo_url: schoolInfo.logo, term_start_date: schoolInfo.termStartDate,
       }).eq("id", schoolId);
       if (error) throw error;
     },

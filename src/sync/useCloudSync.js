@@ -22,7 +22,7 @@ import {
 } from "./cloudSyncSetup.js";
 import { generateConnectCode, parseConnectCode } from "./connectCode.js";
 
-const SYNCED_TABLES = ["students", "attendance", "grades", "fees", "staff"];
+const SYNCED_TABLES = ["students", "attendance", "grades", "fees", "staff", "fee_types"];
 const FLUSH_INTERVAL_MS = 8000;
 const JOIN_TIMEOUT_MS = 20000;
 
@@ -178,7 +178,7 @@ export function useCloudSync({ appState, appSetters }) {
       engine,
       oldLocalData: {
         students: appState.students, attendance: appState.attendance,
-        grades: appState.grades, fees: appState.fees, staff: appState.staff,
+        grades: appState.grades, fees: appState.fees, staff: appState.staff, fee_types: appState.fee_types,
       },
     });
     // Push the full school profile too (register_school only set the
@@ -219,6 +219,7 @@ export function useCloudSync({ appState, appSetters }) {
     if (pulled.attendance?.length) appSetters.attendance(pulled.attendance.map(s => ({ ...s, id: s.client_id })));
     if (pulled.grades?.length) appSetters.grades(pulled.grades.map(s => ({ ...s, id: s.client_id })));
     if (pulled.fees?.length) appSetters.fees(pulled.fees.map(s => ({ ...s, id: s.client_id })));
+    if (pulled.fee_types?.length) appSetters.fee_types(pulled.fee_types.map(s => ({ ...s, id: s.client_id })));
     skipNextInitialPull.current = true;
     setEnabled(true);
     return pulled;

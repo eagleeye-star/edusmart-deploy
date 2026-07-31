@@ -101,7 +101,7 @@ export async function linkExistingCloudSchool({ auth, storage, deviceEmail, devi
  */
 export async function migrateLocalDataIntoSync({ engine, oldLocalData }) {
   const results = {};
-  const tables = ["students", "attendance", "grades", "fees", "staff"];
+  const tables = ["students", "attendance", "grades", "fees", "staff", "fee_types"];
 
   for (const table of tables) {
     const oldRows = (oldLocalData[table] || []).map(row => ({ ...row, client_id: row.id }));
@@ -126,7 +126,7 @@ export async function joinExistingSchoolAndPullData({ auth, storage, remote, dev
   const schoolId = await linkExistingCloudSchool({ auth, storage, deviceEmail, devicePassword });
   try {
     const pulled = {};
-    for (const table of ["staff", "students", "attendance", "grades", "fees"]) {
+    for (const table of ["staff", "students", "attendance", "grades", "fees", "fee_types"]) {
       pulled[table] = await remote.fetchAll(table);
     }
     return { schoolId, pulled };
