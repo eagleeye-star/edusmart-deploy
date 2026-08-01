@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "5.7.1";
+const APP_VERSION = "5.8.0";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -196,6 +196,25 @@ const calcCA    = ca  => Math.round((ca/30)*30);  // CA out of 30
 const calcExam  = ex  => Math.round((ex/70)*70);  // Exam out of 70
 const formatGHS = n   => `GH₵ ${Number(n||0).toFixed(2)}`;
 const todayStr  = ()  => new Date().toISOString().split("T")[0];
+
+// Ghana numbers are stored as typed (e.g. "0244123456" or with spaces/
+// dashes) — wa.me links need international format with no leading
+// zero and no punctuation. Returns null for anything that doesn't
+// look like a real Ghana mobile number, so bulk send can skip it
+// cleanly instead of generating a broken link.
+function formatGhanaPhoneForWhatsApp(phone) {
+  if (!phone) return null;
+  const digits = String(phone).replace(/\D/g, "");
+  if (digits.length === 10 && digits.startsWith("0")) return "233" + digits.slice(1);
+  if (digits.length === 12 && digits.startsWith("233")) return digits;
+  if (digits.length === 9) return "233" + digits; // already missing the leading 0
+  return null;
+}
+function buildWhatsAppLink(phone, message) {
+  const formatted = formatGhanaPhoneForWhatsApp(phone);
+  if (!formatted) return null;
+  return `https://wa.me/${formatted}?text=${encodeURIComponent(message)}`;
+}
 
 // ─── FLEXIBLE FEE TYPES — calculation logic ─────────────────────
 // This is the exact logic tested in isolation (26 cases covering
@@ -2924,7 +2943,7 @@ function Timetable({ timetables,setTimetables,curUser }) {
 }
 
 // ─── COMMUNICATION ───────────────────────────────────────────
-function Communication({ students,school,curUser,fees,attendance,classes }) {
+function Communication({ students,school,curUser,fees,attendance,classes,feeTypes,addAudit,notify,cloudSync }) {
   const [tab,setTab]=useState("whatsapp");
   const [templateType,setTemplateType]=useState("fee_reminder");
   const [selStu,setSelStu]=useState("");
@@ -3068,10 +3087,123 @@ ${school.principalName||"The Principal"}`,
 
   const [letterPreview,setLetterPreview]=useState("");
 
+  // ─── BULK SEND ──────────────────────────────────────────────
+  const [bulkFilterType,setBulkFilterType]=useState("class");
+  const [bulkFilterClass,setBulkFilterClass]=useState(classes[0]);
+  const [bulkFilterFeeType,setBulkFilterFeeType]=useState(feeTypes?.[0]?.id||"");
+  const [bulkTemplateType,setBulkTemplateType]=useState("fee_reminder");
+  const [bulkCustomMessage,setBulkCustomMessage]=useState("");
+  const [bulkChannel,setBulkChannel]=useState("whatsapp"); // "whatsapp" | "sms"
+  const [bulkQueue,setBulkQueue]=useState(null); // null = not started; array once built
+  const [bulkIndex,setBulkIndex]=useState(0);
+  const [bulkResults,setBulkResults]=useState({}); // { [studentId]: "sent" | "skipped" }
+  const [smsConfirming,setSmsConfirming]=useState(false);
+  const [smsSending,setSmsSending]=useState(false);
+  const [smsSendResult,setSmsSendResult]=useState(null);
+
+  const bulkCandidates = (() => {
+    if (bulkFilterType === "all") return activeStudents;
+    if (bulkFilterType === "class") return activeStudents.filter(s=>s.class===bulkFilterClass);
+    if (bulkFilterType === "absent") {
+      return activeStudents.filter(s=>{
+        const recent = attendance.filter(a=>a.studentId===s.id).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3);
+        return recent.length>=3 && recent.every(a=>a.status==="Absent");
+      });
+    }
+    if (bulkFilterType === "arrears") {
+      const ft = (feeTypes||[]).find(f=>f.id===bulkFilterFeeType);
+      if (!ft) return [];
+      return activeStudents.filter(s=>{
+        if (!feeTypeAppliesToStudent(ft, s)) return false;
+        const bal = computeStudentFeeBalances(s, [ft], fees, school.termStartDate)[0];
+        return bal && bal.balance > 0;
+      });
+    }
+    return [];
+  })();
+
+  // A single message-getter covering both pre-built templates and a
+  // free-typed custom message, so the rest of the Bulk Send flow
+  // doesn't need to know which one is in use.
+  const getBulkMessage = (s) => {
+    if (bulkTemplateType === "custom") return bulkCustomMessage;
+    return templates[bulkTemplateType]?.(s) || "";
+  };
+
+  const buildBulkQueue = () => {
+    const queue = bulkCandidates.map(s => {
+      const msg = getBulkMessage(s);
+      return { studentId: s.id, name: s.name, className: s.class, guardian: s.guardian, phone: s.phone,
+        message: msg, waLink: buildWhatsAppLink(s.phone, msg) };
+    });
+    setBulkQueue(queue);
+    setBulkIndex(0);
+    setBulkResults({});
+  };
+
+  const markBulkResult = (result) => {
+    const current = bulkQueue[bulkIndex];
+    setBulkResults(p=>({...p, [current.studentId]: result}));
+    if (bulkIndex < bulkQueue.length-1) setBulkIndex(i=>i+1);
+  };
+
+  const finishBulkSend = () => {
+    const sentCount = Object.values(bulkResults).filter(r=>r==="sent").length;
+    const skippedCount = Object.values(bulkResults).filter(r=>r==="skipped").length;
+    const notReached = bulkQueue.length - sentCount - skippedCount;
+    addAudit&&addAudit(`Bulk WhatsApp (${bulkTemplateType.replace("_"," ")}): ${sentCount} sent, ${skippedCount} skipped, ${notReached} not reached — ${bulkQueue.length} total recipients`,"Communication");
+    notify&&notify(`Bulk send finished — ${sentCount} sent, ${skippedCount} skipped`);
+    setBulkQueue(null);
+  };
+
+  // SMS goes through a real API (unlike WhatsApp's manual-tap links),
+  // so this can be a genuine one-click send — but because it's a paid
+  // action with no undo, it's gated behind an explicit confirmation
+  // step showing exactly who and what, first.
+  const smsCandidatesWithPhone = bulkCandidates.filter(s=>(s.phone||"").replace(/\D/g,"").length>=9);
+  const smsMessagePreview = smsCandidatesWithPhone[0] ? getBulkMessage(smsCandidatesWithPhone[0]) : "";
+  const smsSegmentCount = Math.max(1, Math.ceil((smsMessagePreview||"").length / 160));
+
+  const confirmSendSms = async () => {
+    setSmsSending(true);
+    try {
+      const recipients = smsCandidatesWithPhone.map(s=>formatGhanaPhoneForWhatsApp(s.phone)).filter(Boolean).map(p=>`+${p}`);
+      const messages = smsCandidatesWithPhone.map(s=>getBulkMessage(s));
+      // Hubtel's API sends one message per call — if every recipient
+      // gets the SAME text (templates personalize per-student, but a
+      // custom message is identical for everyone), send it as one
+      // batch; per-student personalized templates still go through
+      // individually so each parent's message is actually correct.
+      const allSame = messages.every(m=>m===messages[0]);
+      let result;
+      if (allSame) {
+        result = await cloudSync.sendBulkSms(recipients, messages[0], curUser?.code);
+      } else {
+        // send one at a time so each student's personalized message is correct
+        const results = [];
+        for (let i=0;i<recipients.length;i++){
+          const r = await cloudSync.sendBulkSms([recipients[i]], messages[i], curUser?.code);
+          if (r.results) results.push(...r.results);
+        }
+        result = { results, sentCount: results.filter(r=>r.status==="sent").length, failedCount: results.filter(r=>r.status!=="sent").length };
+      }
+      setSmsSendResult(result);
+      if (result.error) { notify(result.error, "error"); }
+      else {
+        addAudit(`Bulk SMS (${bulkTemplateType==="custom"?"custom message":bulkTemplateType.replace("_"," ")}): ${result.sentCount} sent, ${result.failedCount} failed — ${smsCandidatesWithPhone.length} recipients`,"Communication");
+        notify(`SMS sent — ${result.sentCount} delivered, ${result.failedCount} failed`);
+      }
+    } catch(e) {
+      notify(e?.message || "SMS send failed — check your Hubtel credentials in Settings.", "error");
+    }
+    setSmsSending(false);
+    setSmsConfirming(false);
+  };
+
   return (
     <div>
       <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>💬 Parent Communication</h2>
-      <Tabs tabs={[{key:"whatsapp",label:"💬 WhatsApp Templates"},{key:"letters",label:"📄 Printed Letters"}]} active={tab} onChange={setTab}/>
+      <Tabs tabs={[{key:"whatsapp",label:"💬 WhatsApp Templates"},{key:"bulk",label:"📤 Bulk Send"},{key:"letters",label:"📄 Printed Letters"}]} active={tab} onChange={setTab}/>
 
       {tab==="whatsapp"&&(
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
@@ -3107,6 +3239,146 @@ ${school.principalName||"The Principal"}`,
             ):<div style={{ textAlign:"center",color:"#9ca3af",padding:40 }}>Select a template and click Preview</div>}
             {preview&&<p style={{ fontSize:11,color:"#94a3b8",marginTop:8 }}>Copy this message and paste into WhatsApp. For broadcast, scroll through each student's message.</p>}
           </Card>
+        </div>
+      )}
+
+      {tab==="bulk"&&(
+        <div>
+          {smsSendResult ? (
+            <Card style={{ padding:22,maxWidth:560 }}>
+              <h3 style={{ margin:"0 0 14px",fontSize:16 }}>SMS Send Results</h3>
+              <div style={{ display:"flex",gap:10,marginBottom:16 }}>
+                <div style={{ flex:1,background:"#dcfce7",borderRadius:8,padding:14,textAlign:"center" }}>
+                  <div style={{ fontSize:24,fontWeight:700,color:"#166534" }}>{smsSendResult.sentCount||0}</div>
+                  <div style={{ fontSize:12,color:"#166534" }}>Delivered</div>
+                </div>
+                <div style={{ flex:1,background:"#fee2e2",borderRadius:8,padding:14,textAlign:"center" }}>
+                  <div style={{ fontSize:24,fontWeight:700,color:"#991b1b" }}>{smsSendResult.failedCount||0}</div>
+                  <div style={{ fontSize:12,color:"#991b1b" }}>Failed</div>
+                </div>
+              </div>
+              {smsSendResult.results?.some(r=>r.status!=="sent") && (
+                <div style={{ maxHeight:200,overflowY:"auto",background:"#f8fafc",borderRadius:8,padding:12,marginBottom:16 }}>
+                  {smsSendResult.results.filter(r=>r.status!=="sent").map((r,i)=>(
+                    <div key={i} style={{ fontSize:11,color:"#7f1d1d",padding:"3px 0" }}>{r.phone} — {r.error||"failed"}</div>
+                  ))}
+                </div>
+              )}
+              <button onClick={()=>{setSmsSendResult(null);setBulkQueue(null);}} style={{ ...btnP,width:"100%" }}>Done</button>
+            </Card>
+          ) : smsConfirming ? (
+            <Card style={{ padding:22,maxWidth:560 }}>
+              <h3 style={{ margin:"0 0 6px",fontSize:16 }}>Confirm SMS Send</h3>
+              <p style={{ fontSize:12,color:"#64748b",marginBottom:16 }}>This sends real SMS through your Hubtel account and cannot be undone — check this carefully before confirming.</p>
+              <div style={{ background:"#fef3c7",borderRadius:8,padding:14,marginBottom:16 }}>
+                <div style={{ fontSize:13,marginBottom:6 }}><strong>{smsCandidatesWithPhone.length}</strong> recipient(s) will receive this message{smsCandidatesWithPhone.length<bulkCandidates.length&&` (${bulkCandidates.length-smsCandidatesWithPhone.length} skipped — no usable phone number)`}.</div>
+                <div style={{ fontSize:12,color:"#92400e" }}>{smsMessagePreview.length} characters · {smsSegmentCount} SMS segment{smsSegmentCount>1?"s":""} per message{smsSegmentCount>1&&" (longer messages cost more per recipient)"}</div>
+              </div>
+              <pre style={{ background:"#f8fafc",borderRadius:10,padding:14,fontSize:12,lineHeight:1.6,whiteSpace:"pre-wrap",margin:"0 0 16px",color:"#374151",maxHeight:220,overflowY:"auto",fontFamily:"inherit" }}>{smsMessagePreview}</pre>
+              <div style={{ display:"flex",gap:8 }}>
+                <button onClick={()=>setSmsConfirming(false)} style={{ ...btnS,flex:1 }} disabled={smsSending}>Cancel</button>
+                <button onClick={confirmSendSms} style={{ ...btnP,flex:2,background:"#059669" }} disabled={smsSending}>
+                  {smsSending?"Sending...":`Send to ${smsCandidatesWithPhone.length} recipient(s)`}
+                </button>
+              </div>
+            </Card>
+          ) : !bulkQueue ? (
+            <Card style={{ padding:22,maxWidth:560 }}>
+              <h3 style={{ margin:"0 0 6px",fontSize:16 }}>Bulk Send</h3>
+              <p style={{ fontSize:12,color:"#64748b",marginBottom:14 }}>
+                Select who to message and how to reach them.
+              </p>
+              <Row label="Send Via">
+                <div style={{ display:"flex",gap:8 }}>
+                  <button onClick={()=>setBulkChannel("whatsapp")} style={{ ...btnSm,flex:1,padding:"8px",background:bulkChannel==="whatsapp"?"#1e40af":"#f1f5f9",color:bulkChannel==="whatsapp"?"#fff":"#374151" }}>💬 WhatsApp</button>
+                  <button onClick={()=>setBulkChannel("sms")} style={{ ...btnSm,flex:1,padding:"8px",background:bulkChannel==="sms"?"#1e40af":"#f1f5f9",color:bulkChannel==="sms"?"#fff":"#374151" }}>📱 SMS</button>
+                </div>
+              </Row>
+              {bulkChannel==="sms" && !cloudSync?.enabled && (
+                <div style={{ background:"#fee2e2",borderRadius:8,padding:10,fontSize:12,color:"#991b1b",marginBottom:12 }}>SMS requires Cloud Sync and Hubtel credentials set up first — see Settings → Bulk SMS.</div>
+              )}
+              <Row label="Send To">
+                <select value={bulkFilterType} onChange={e=>setBulkFilterType(e.target.value)} style={inp}>
+                  <option value="class">A specific class</option>
+                  <option value="all">All active students</option>
+                  <option value="arrears">Everyone with an outstanding balance</option>
+                  <option value="absent">Everyone absent 3+ days running</option>
+                </select>
+              </Row>
+              {bulkFilterType==="class" && (
+                <Row label="Class"><select value={bulkFilterClass} onChange={e=>setBulkFilterClass(e.target.value)} style={inp}>{classes.map(c=><option key={c}>{c}</option>)}</select></Row>
+              )}
+              {bulkFilterType==="arrears" && (
+                <Row label="Which Fee"><select value={bulkFilterFeeType} onChange={e=>setBulkFilterFeeType(e.target.value)} style={inp}>
+                  {(feeTypes||[]).filter(ft=>ft.active).map(ft=><option key={ft.id} value={ft.id}>{ft.name}</option>)}
+                </select></Row>
+              )}
+              <Row label="Message"><select value={bulkTemplateType} onChange={e=>setBulkTemplateType(e.target.value)} style={inp}>
+                <option value="fee_reminder">Fee Reminder</option>
+                <option value="absence_alert">Absence Alert</option>
+                <option value="report_ready">Report Card Ready</option>
+                <option value="exam_notice">Exam Notice</option>
+                <option value="pta_invite">PTA Invitation</option>
+                <option value="custom">✏️ Custom Message</option>
+              </select></Row>
+              {bulkTemplateType==="custom" && (
+                <Row label="Your Message">
+                  <textarea value={bulkCustomMessage} onChange={e=>setBulkCustomMessage(e.target.value)} rows={5} style={{ ...inp,width:"100%",fontFamily:"inherit" }} placeholder="Type your message here..."/>
+                  {bulkChannel==="sms" && <p style={{ fontSize:11,color:"#94a3b8",marginTop:4 }}>{bulkCustomMessage.length} characters · {Math.max(1,Math.ceil(bulkCustomMessage.length/160))} SMS segment(s) per recipient</p>}
+                </Row>
+              )}
+              <div style={{ background:"#f0f9ff",borderRadius:8,padding:12,fontSize:13,marginBottom:16 }}>
+                <strong>{bulkCandidates.length}</strong> student(s) match this filter.
+                {bulkCandidates.length>0 && (()=>{ const noPhone = bulkCandidates.filter(s=>!formatGhanaPhoneForWhatsApp(s.phone)).length; return noPhone>0 ? <span style={{color:"#92400e"}}> {noPhone} have no usable phone number on file and will be skipped automatically.</span> : null; })()}
+              </div>
+              <button
+                onClick={()=>{
+                  if (bulkTemplateType==="custom" && !bulkCustomMessage.trim()) { notify("Type a message first","error"); return; }
+                  if (bulkChannel==="sms") setSmsConfirming(true); else buildBulkQueue();
+                }}
+                disabled={bulkCandidates.length===0 || (bulkChannel==="sms" && !cloudSync?.enabled)}
+                style={{ ...btnP,width:"100%",opacity:(bulkCandidates.length===0||(bulkChannel==="sms"&&!cloudSync?.enabled))?0.5:1 }}>
+                {bulkChannel==="sms" ? `Review & Send SMS (${bulkCandidates.length} recipients)` : `Start Bulk Send (${bulkCandidates.length} recipients)`}
+              </button>
+            </Card>
+          ) : (
+            <Card style={{ padding:22,maxWidth:560 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+                <h3 style={{ margin:0,fontSize:16 }}>Recipient {bulkIndex+1} of {bulkQueue.length}</h3>
+                <button onClick={finishBulkSend} style={{ ...btnS,padding:"5px 12px",fontSize:12 }}>Stop & Finish</button>
+              </div>
+              <div style={{ height:6,background:"#f1f5f9",borderRadius:4,marginBottom:16 }}>
+                <div style={{ height:6,borderRadius:4,background:"#1e40af",width:`${((bulkIndex)/bulkQueue.length)*100}%` }}/>
+              </div>
+              {(() => {
+                const r = bulkQueue[bulkIndex];
+                const hasPhone = !!r.waLink;
+                return (
+                  <>
+                    <div style={{ fontSize:13,marginBottom:10 }}>
+                      <strong>{r.name}</strong> ({r.className}) — {r.phone || "no phone on file"}
+                      {!hasPhone && <Badge text="No usable phone" color="#991b1b" bg="#fee2e2"/>}
+                    </div>
+                    <pre style={{ background:"#f8fafc",borderRadius:10,padding:14,fontSize:12,lineHeight:1.6,whiteSpace:"pre-wrap",margin:"0 0 16px",color:"#374151",maxHeight:260,overflowY:"auto",fontFamily:"inherit" }}>{r.message}</pre>
+                    <div style={{ display:"flex",gap:8 }}>
+                      {hasPhone ? (
+                        <a href={r.waLink} target="_blank" rel="noopener noreferrer" onClick={()=>markBulkResult("sent")}
+                          style={{ ...btnP,flex:2,textAlign:"center",textDecoration:"none",display:"block" }}>
+                          💬 Open WhatsApp & Send
+                        </a>
+                      ) : (
+                        <button disabled style={{ ...btnP,flex:2,opacity:0.5 }}>No phone number</button>
+                      )}
+                      <button onClick={()=>markBulkResult("skipped")} style={{ ...btnS,flex:1 }}>Skip</button>
+                    </div>
+                    {bulkIndex===bulkQueue.length-1 && bulkResults[r.studentId] && (
+                      <button onClick={finishBulkSend} style={{ ...btnP,width:"100%",marginTop:12,background:"#059669" }}>✅ Done — Finish Bulk Send</button>
+                    )}
+                  </>
+                );
+              })()}
+            </Card>
+          )}
         </div>
       )}
 
@@ -3153,17 +3425,6 @@ function Reports({ students,grades,attendance,fees,expenses,school,classes,subje
   const attRate=sid=>{ const all=attendance.filter(a=>a.studentId===sid); return all.length?Math.round(attendance.filter(a=>a.studentId===sid&&a.status==="Present").length/all.length*100):100; };
   const gradeColor=g=>g==="A"?"#16a34a":g==="B"?"#0369a1":g==="C"?"#d97706":"#dc2626";
 
-  // Moved out of the render tree — this was previously called inside an
-  // IIFE nested in JSX, which breaks React's Rules of Hooks (a hook can
-  // only be called at a component's top level, never inside a nested
-  // function). That was the actual cause of the whole app going blank:
-  // React throws when it detects a hook called somewhere it doesn't
-  // expect, and with no error boundary around it, the crash took out
-  // everything, not just this one tab.
-  const rankedClass = [...classStu].map(s=>({ ...s,av:avg(sg(s.id,st)),att:attRate(s.id) })).sort((a,b)=>b.av-a.av)
-    .map((s,i)=>({ ...s, position:i+1 }));
-  const classSort = useSort(rankedClass, "position");
-
   return (
     <div>
       <style>{`
@@ -3174,7 +3435,7 @@ function Reports({ students,grades,attendance,fees,expenses,school,classes,subje
         }
       `}</style>
       <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>📋 Reports</h2>
-      <Tabs tabs={[{key:"student",label:"Student Report Card"},{key:"class",label:"Class Report"},{key:"subject",label:"Subject Analysis"},{key:"school",label:"School Dashboard"}]} active={rt} onChange={setRt}/>
+      <Tabs tabs={[{key:"student",label:"Student Report Card"},{key:"subject",label:"Subject Analysis"},{key:"school",label:"School Dashboard"}]} active={rt} onChange={setRt}/>
 
       {rt==="student"&&(
         <div>
@@ -3230,29 +3491,6 @@ function Reports({ students,grades,attendance,fees,expenses,school,classes,subje
               </Card>
             );
           })()}
-        </div>
-      )}
-
-      {rt==="class"&&(
-        <div>
-          <div style={{ display:"flex",gap:8,marginBottom:14 }}>
-            <select value={sc} onChange={e=>setSc(e.target.value)} style={{ ...inp,width:160 }}>{classes.map(c=><option key={c}>{c}</option>)}</select>
-            <select value={st} onChange={e=>setSt(e.target.value)} style={{ ...inp,width:120 }}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
-          </div>
-          <Table cols={["#","Student","Avg Score","Grade","Attendance","Fees Status","Position"]}
-            colKeys={["position","name","av",null,"att",null,"position"]}
-            sortState={classSort}
-            rows={classSort.sorted.map((s)=>{ const i=s.position-1; return (
-              <tr key={s.id} style={{ borderBottom:"1px solid #f1f5f9",background:i<3?"#fffbeb":"#fff" }}>
-                <TD small color={i<3?"#d97706":"#9ca3af"}>{s.position}{i===0?"🥇":i===1?"🥈":i===2?"🥉":""}</TD>
-                <TD bold>{s.name}</TD>
-                <TD bold color={s.av>=70?"#16a34a":s.av>=50?"#d97706":"#dc2626"}>{s.av?s.av+"%":"No data"}</TD>
-                <td style={{ padding:"8px 12px" }}>{s.av?<Badge text={calcGrade(s.av)} color={gradeColor(calcGrade(s.av))}/>:<span>-</span>}</td>
-                <TD color={s.att>=80?"#16a34a":"#dc2626"} bold>{s.att}%</TD>
-                <td style={{ padding:"8px 12px" }}>{s.fees-s.paid===0?<Badge text="Cleared ✅" color="#166534" bg="#dcfce7"/>:<Badge text={formatGHS(s.fees-s.paid)+" due"} color="#991b1b" bg="#fee2e2"/>}</td>
-                <TD bold>{s.position}</TD>
-              </tr>
-            );})} emptyMsg="No students in this class."/>
         </div>
       )}
 
@@ -3555,6 +3793,29 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   const [licKeyCopied,setLicKeyCopied]=useState(false);
   const [newLicKeyInput,setNewLicKeyInput]=useState("");
   const [newLicKeyErr,setNewLicKeyErr]=useState("");
+  const [smsForm,setSmsForm]=useState({ clientId:"",clientSecret:"",senderId:"" });
+  const [smsStatus,setSmsStatus]=useState({ configured:false });
+  const [smsBusy,setSmsBusy]=useState(false);
+  const [smsMsg,setSmsMsg]=useState("");
+
+  useEffect(()=>{
+    if(cloudSync?.enabled && cloudSync.getSmsStatus){ cloudSync.getSmsStatus().then(setSmsStatus); }
+  },[cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSaveSmsCredentials=async()=>{
+    if(!smsForm.clientId.trim()||!smsForm.clientSecret.trim()||!smsForm.senderId.trim()){ setSmsMsg("All three fields are required."); return; }
+    setSmsBusy(true); setSmsMsg("");
+    try{
+      await cloudSync.saveSmsCredentials({ clientId:smsForm.clientId.trim(), clientSecret:smsForm.clientSecret.trim(), senderId:smsForm.senderId.trim() });
+      const status = await cloudSync.getSmsStatus();
+      setSmsStatus(status);
+      setSmsForm({ clientId:"",clientSecret:"",senderId:"" });
+      addAudit("Hubtel SMS credentials saved","Settings");
+      notify("SMS credentials saved ✅");
+    } catch(e){ setSmsMsg(e?.message || "Couldn't save credentials — check your connection and try again."); }
+    setSmsBusy(false);
+  };
+
 
   const save=()=>{ setSchool({...form}); addAudit("Updated school settings","Settings"); notify("Settings saved ✅"); };
 
@@ -3773,7 +4034,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   return (
     <div>
       <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>⚙️ Settings</h2>
-      <Tabs tabs={[{key:"school",label:"🏫 School Profile"},{key:"classes",label:"🏷️ Classes & Subjects"},{key:"feetypes",label:"💵 Fee Types"},{key:"security",label:"🔐 Security"},{key:"data",label:"💾 Data & Backup"},{key:"cloud",label:"☁️ Cloud Sync"},{key:"licence",label:"🔑 Licence"}]} active={tab} onChange={setTab}/>
+      <Tabs tabs={[{key:"school",label:"🏫 School Profile"},{key:"classes",label:"🏷️ Classes & Subjects"},{key:"feetypes",label:"💵 Fee Types"},{key:"security",label:"🔐 Security"},{key:"data",label:"💾 Data & Backup"},{key:"cloud",label:"☁️ Cloud Sync"},{key:"sms",label:"📱 Bulk SMS"},{key:"licence",label:"🔑 Licence"}]} active={tab} onChange={setTab}/>
 
       {tab==="school"&&(
         <Card style={{ padding:24,maxWidth:580 }}>
@@ -4025,6 +4286,42 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
               </div>
 
               <button onClick={handleDisableCloud} style={{ ...btnS,background:"#fee2e2",color:"#991b1b" }}>Turn Off Cloud Sync on This Device</button>
+            </>
+          )}
+        </Card>
+      )}
+
+      {tab==="sms"&&(
+        <Card style={{ padding:24,maxWidth:520 }}>
+          <h3 style={{ margin:"0 0 6px",fontSize:16 }}>📱 Bulk SMS (Hubtel)</h3>
+          <p style={{ fontSize:12,color:"#64748b",marginBottom:16 }}>
+            Send real SMS to parents — reaches every phone, not just ones with WhatsApp and data. Your school pays Hubtel directly for what you send (typically a few pesewas per message); EduSmart never sees or charges for this.
+          </p>
+
+          {!cloudSync?.enabled ? (
+            <div style={{ background:"#fef3c7",borderRadius:8,padding:12,fontSize:12,color:"#92400e" }}>
+              Bulk SMS requires Cloud Sync to be turned on first (Settings → Cloud Sync) — sending goes through a secure relay tied to your school's account, so set that up before adding SMS credentials.
+            </div>
+          ) : (
+            <>
+              <div style={{ marginBottom:16 }}>
+                <Badge text={smsStatus.configured?`✅ Connected — Sender ID: ${smsStatus.senderId}`:"Not set up yet"} color={smsStatus.configured?"#166534":"#92400e"} bg={smsStatus.configured?"#dcfce7":"#fef3c7"}/>
+              </div>
+
+              <div style={{ background:"#f0f9ff",borderRadius:8,padding:12,fontSize:12,color:"#0369a1",marginBottom:16 }}>
+                Don't have a Hubtel account yet? Sign up at hubtel.com, go to Messaging → Manage → Programmable SMS, and create an API Key to get your Client ID and Client Secret. You'll also need to register a Sender ID (e.g. your school's short name).
+              </div>
+
+              <Row label="Hubtel Client ID"><input value={smsForm.clientId} onChange={e=>setSmsForm(p=>({...p,clientId:e.target.value}))} style={inp}/></Row>
+              <Row label="Hubtel Client Secret"><input type="password" value={smsForm.clientSecret} onChange={e=>setSmsForm(p=>({...p,clientSecret:e.target.value}))} style={inp}/></Row>
+              <Row label="Sender ID"><input value={smsForm.senderId} onChange={e=>setSmsForm(p=>({...p,senderId:e.target.value}))} style={inp} placeholder="e.g. EIKWE"/></Row>
+              {smsMsg&&<p style={{ color:smsMsg.includes("saved")?"#166534":"#dc2626",fontSize:12,marginBottom:10 }}>{smsMsg}</p>}
+              <button onClick={handleSaveSmsCredentials} disabled={smsBusy} style={{ ...btnP,width:"100%" }}>
+                {smsBusy?"Saving...":(smsStatus.configured?"Replace Credentials":"Save Credentials")}
+              </button>
+              <p style={{ fontSize:11,color:"#94a3b8",marginTop:10 }}>
+                For security, your Client Secret is never shown again after saving — if you need to check it, view it in your Hubtel dashboard directly.
+              </p>
             </>
           )}
         </Card>

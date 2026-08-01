@@ -242,6 +242,23 @@ export function useCloudSync({ appState, appSetters }) {
     setEnabled(false);
   }, []);
 
+  const saveSmsCredentials = useCallback(async (creds) => {
+    const link = getDeviceLink(window.localStorage);
+    if (!link) throw new Error("Cloud sync isn't enabled on this device.");
+    await remoteRef.current.saveSmsCredentials(link.schoolId, creds);
+  }, []);
+
+  const getSmsStatus = useCallback(async () => {
+    if (!enabled) return { configured: false };
+    try { return await remoteRef.current.getSmsStatus(); }
+    catch (e) { return { configured: false }; }
+  }, [enabled]);
+
+  const sendBulkSms = useCallback(async (recipients, message, sentBy) => {
+    if (!enabled) throw new Error("Cloud sync isn't enabled on this device — SMS requires it, since sending goes through your school's own account.");
+    return remoteRef.current.sendBulkSms(recipients, message, sentBy);
+  }, [enabled]);
+
   // The manual "Sync Now" button — forces an immediate attempt instead
   // of waiting for the next automatic 8-second tick, and immediately
   // refreshes the status so the UI doesn't sit stale even if the tab
@@ -291,5 +308,6 @@ export function useCloudSync({ appState, appSetters }) {
     enableNewSchool, joinWithConnectCode, linkToExistingSchool,
     pushLicenceToCloud, checkForLicenceUpdate,
     getConnectCode, disable, syncNow,
+    saveSmsCredentials, getSmsStatus, sendBulkSms,
   };
 }

@@ -187,6 +187,38 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
       return { type: data.licence_type, expiry: data.licence_expiry, lifetime: !data.licence_expiry, key: data.licence_key };
     },
 
+    // Write-only, deliberately — Settings lets a school SET or REPLACE
+    // their Hubtel credentials, but never fetches client_secret back
+    // for display. Upsert since a school either has none yet (first
+    // time) or is replacing an existing set.
+    async saveSmsCredentials(schoolId, { clientId, clientSecret, senderId }) {
+      const { error } = await supabaseClient.from("sms_credentials").upsert({
+        school_id: schoolId, client_id: clientId, client_secret: clientSecret, sender_id: senderId,
+      }, { onConflict: "school_id" });
+      if (error) throw error;
+    },
+
+    // Only tells the app WHETHER credentials exist (for showing
+    // "Connected" vs "Not set up" in Settings) and what sender ID is
+    // in use — never the secret itself.
+    async getSmsStatus() {
+      const { data, error } = await supabaseClient.from("sms_credentials").select("sender_id").maybeSingle();
+      if (error) throw error;
+      return data ? { configured: true, senderId: data.sender_id } : { configured: false };
+    },
+
+    // Calls the send-sms Edge Function — the only place Hubtel's API
+    // is ever actually reached from. See supabase/functions/send-sms
+    // for the server-side half of this, tested separately (19 tests
+    // covering success, partial failure, and cross-school isolation).
+    async sendBulkSms(recipients, message, sentBy) {
+      const { data, error } = await supabaseClient.functions.invoke("send-sms", {
+        body: { recipients, message, sentBy },
+      });
+      if (error) throw error;
+      return data;
+    },
+
     subscribe(table, onRow) {
       const channel = supabaseClient
         .channel(`${table}-sync-${Math.random().toString(36).slice(2)}`)
