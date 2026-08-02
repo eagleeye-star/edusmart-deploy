@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "5.8.0";
+const APP_VERSION = "5.8.1";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -3169,7 +3169,7 @@ ${school.principalName||"The Principal"}`,
     try {
       const recipients = smsCandidatesWithPhone.map(s=>formatGhanaPhoneForWhatsApp(s.phone)).filter(Boolean).map(p=>`+${p}`);
       const messages = smsCandidatesWithPhone.map(s=>getBulkMessage(s));
-      // Hubtel's API sends one message per call — if every recipient
+      // Arkesel's API sends one message per call — if every recipient
       // gets the SAME text (templates personalize per-student, but a
       // custom message is identical for everyone), send it as one
       // batch; per-student personalized templates still go through
@@ -3194,7 +3194,7 @@ ${school.principalName||"The Principal"}`,
         notify(`SMS sent — ${result.sentCount} delivered, ${result.failedCount} failed`);
       }
     } catch(e) {
-      notify(e?.message || "SMS send failed — check your Hubtel credentials in Settings.", "error");
+      notify(e?.message || "SMS send failed — check your Arkesel credentials in Settings.", "error");
     }
     setSmsSending(false);
     setSmsConfirming(false);
@@ -3269,7 +3269,7 @@ ${school.principalName||"The Principal"}`,
           ) : smsConfirming ? (
             <Card style={{ padding:22,maxWidth:560 }}>
               <h3 style={{ margin:"0 0 6px",fontSize:16 }}>Confirm SMS Send</h3>
-              <p style={{ fontSize:12,color:"#64748b",marginBottom:16 }}>This sends real SMS through your Hubtel account and cannot be undone — check this carefully before confirming.</p>
+              <p style={{ fontSize:12,color:"#64748b",marginBottom:16 }}>This sends real SMS through your Arkesel account and cannot be undone — check this carefully before confirming.</p>
               <div style={{ background:"#fef3c7",borderRadius:8,padding:14,marginBottom:16 }}>
                 <div style={{ fontSize:13,marginBottom:6 }}><strong>{smsCandidatesWithPhone.length}</strong> recipient(s) will receive this message{smsCandidatesWithPhone.length<bulkCandidates.length&&` (${bulkCandidates.length-smsCandidatesWithPhone.length} skipped — no usable phone number)`}.</div>
                 <div style={{ fontSize:12,color:"#92400e" }}>{smsMessagePreview.length} characters · {smsSegmentCount} SMS segment{smsSegmentCount>1?"s":""} per message{smsSegmentCount>1&&" (longer messages cost more per recipient)"}</div>
@@ -3295,7 +3295,7 @@ ${school.principalName||"The Principal"}`,
                 </div>
               </Row>
               {bulkChannel==="sms" && !cloudSync?.enabled && (
-                <div style={{ background:"#fee2e2",borderRadius:8,padding:10,fontSize:12,color:"#991b1b",marginBottom:12 }}>SMS requires Cloud Sync and Hubtel credentials set up first — see Settings → Bulk SMS.</div>
+                <div style={{ background:"#fee2e2",borderRadius:8,padding:10,fontSize:12,color:"#991b1b",marginBottom:12 }}>SMS requires Cloud Sync and Arkesel credentials set up first — see Settings → Bulk SMS.</div>
               )}
               <Row label="Send To">
                 <select value={bulkFilterType} onChange={e=>setBulkFilterType(e.target.value)} style={inp}>
@@ -3793,7 +3793,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   const [licKeyCopied,setLicKeyCopied]=useState(false);
   const [newLicKeyInput,setNewLicKeyInput]=useState("");
   const [newLicKeyErr,setNewLicKeyErr]=useState("");
-  const [smsForm,setSmsForm]=useState({ clientId:"",clientSecret:"",senderId:"" });
+  const [smsForm,setSmsForm]=useState({ apiKey:"",senderId:"" });
   const [smsStatus,setSmsStatus]=useState({ configured:false });
   const [smsBusy,setSmsBusy]=useState(false);
   const [smsMsg,setSmsMsg]=useState("");
@@ -3803,14 +3803,14 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   },[cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSaveSmsCredentials=async()=>{
-    if(!smsForm.clientId.trim()||!smsForm.clientSecret.trim()||!smsForm.senderId.trim()){ setSmsMsg("All three fields are required."); return; }
+    if(!smsForm.apiKey.trim()||!smsForm.senderId.trim()){ setSmsMsg("Both fields are required."); return; }
     setSmsBusy(true); setSmsMsg("");
     try{
-      await cloudSync.saveSmsCredentials({ clientId:smsForm.clientId.trim(), clientSecret:smsForm.clientSecret.trim(), senderId:smsForm.senderId.trim() });
+      await cloudSync.saveSmsCredentials({ apiKey:smsForm.apiKey.trim(), senderId:smsForm.senderId.trim() });
       const status = await cloudSync.getSmsStatus();
       setSmsStatus(status);
-      setSmsForm({ clientId:"",clientSecret:"",senderId:"" });
-      addAudit("Hubtel SMS credentials saved","Settings");
+      setSmsForm({ apiKey:"",senderId:"" });
+      addAudit("Arkesel SMS credentials saved","Settings");
       notify("SMS credentials saved ✅");
     } catch(e){ setSmsMsg(e?.message || "Couldn't save credentials — check your connection and try again."); }
     setSmsBusy(false);
@@ -4293,9 +4293,9 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
 
       {tab==="sms"&&(
         <Card style={{ padding:24,maxWidth:520 }}>
-          <h3 style={{ margin:"0 0 6px",fontSize:16 }}>📱 Bulk SMS (Hubtel)</h3>
+          <h3 style={{ margin:"0 0 6px",fontSize:16 }}>📱 Bulk SMS (Arkesel)</h3>
           <p style={{ fontSize:12,color:"#64748b",marginBottom:16 }}>
-            Send real SMS to parents — reaches every phone, not just ones with WhatsApp and data. Your school pays Hubtel directly for what you send (typically a few pesewas per message); EduSmart never sees or charges for this.
+            Send real SMS to parents — reaches every phone, not just ones with WhatsApp and data. Your school pays Arkesel directly for what you send; EduSmart never sees or charges for this.
           </p>
 
           {!cloudSync?.enabled ? (
@@ -4309,18 +4309,17 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
               </div>
 
               <div style={{ background:"#f0f9ff",borderRadius:8,padding:12,fontSize:12,color:"#0369a1",marginBottom:16 }}>
-                Don't have a Hubtel account yet? Sign up at hubtel.com, go to Messaging → Manage → Programmable SMS, and create an API Key to get your Client ID and Client Secret. You'll also need to register a Sender ID (e.g. your school's short name).
+                Don't have an Arkesel account yet? Sign up free at arkesel.com, then find your API Key under Developer API / SMS API in your dashboard. You'll also need to register a Sender ID (e.g. your school's short name) — this needs approval, so it's worth doing a day or two ahead of when you actually need to send.
               </div>
 
-              <Row label="Hubtel Client ID"><input value={smsForm.clientId} onChange={e=>setSmsForm(p=>({...p,clientId:e.target.value}))} style={inp}/></Row>
-              <Row label="Hubtel Client Secret"><input type="password" value={smsForm.clientSecret} onChange={e=>setSmsForm(p=>({...p,clientSecret:e.target.value}))} style={inp}/></Row>
+              <Row label="Arkesel API Key"><input type="password" value={smsForm.apiKey} onChange={e=>setSmsForm(p=>({...p,apiKey:e.target.value}))} style={inp}/></Row>
               <Row label="Sender ID"><input value={smsForm.senderId} onChange={e=>setSmsForm(p=>({...p,senderId:e.target.value}))} style={inp} placeholder="e.g. EIKWE"/></Row>
               {smsMsg&&<p style={{ color:smsMsg.includes("saved")?"#166534":"#dc2626",fontSize:12,marginBottom:10 }}>{smsMsg}</p>}
               <button onClick={handleSaveSmsCredentials} disabled={smsBusy} style={{ ...btnP,width:"100%" }}>
                 {smsBusy?"Saving...":(smsStatus.configured?"Replace Credentials":"Save Credentials")}
               </button>
               <p style={{ fontSize:11,color:"#94a3b8",marginTop:10 }}>
-                For security, your Client Secret is never shown again after saving — if you need to check it, view it in your Hubtel dashboard directly.
+                For security, your API Key is never shown again after saving — if you need to check it, view it in your Arkesel dashboard directly.
               </p>
             </>
           )}

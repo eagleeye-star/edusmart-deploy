@@ -188,12 +188,12 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
     },
 
     // Write-only, deliberately — Settings lets a school SET or REPLACE
-    // their Hubtel credentials, but never fetches client_secret back
-    // for display. Upsert since a school either has none yet (first
-    // time) or is replacing an existing set.
-    async saveSmsCredentials(schoolId, { clientId, clientSecret, senderId }) {
+    // their Arkesel API key, but never fetches it back for display.
+    // Upsert since a school either has none yet (first time) or is
+    // replacing an existing one.
+    async saveSmsCredentials(schoolId, { apiKey, senderId }) {
       const { error } = await supabaseClient.from("sms_credentials").upsert({
-        school_id: schoolId, client_id: clientId, client_secret: clientSecret, sender_id: senderId,
+        school_id: schoolId, api_key: apiKey, sender_id: senderId,
       }, { onConflict: "school_id" });
       if (error) throw error;
     },
