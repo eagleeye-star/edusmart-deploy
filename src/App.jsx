@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "6.0.2";
+const APP_VERSION = "6.1.0";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -1118,7 +1118,15 @@ function FirstRunWizard({ onComplete, licInfo, cloudSync, notify }) {
 }
 
 
-function Dashboard({ school,students,fees,expenses,attendance,grades,books,borrows,users,curUser,absentAlerts,feeAlerts,overdueBooks,noStock,payroll,examSchedule,mockExams,feeTypes }) {
+function Dashboard({ school,students,fees,expenses,attendance,grades,books,borrows,users,curUser,absentAlerts,feeAlerts,overdueBooks,noStock,payroll,examSchedule,mockExams,feeTypes,cloudSync }) {
+  const [smsBalanceInfo,setSmsBalanceInfo]=useState(null);
+  useEffect(()=>{
+    if(cloudSync?.enabled && cloudSync.getSmsStatus){
+      cloudSync.getSmsStatus().then(status=>{ if(status.configured) setSmsBalanceInfo(status); });
+    }
+  },[cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  const LOW_BALANCE_THRESHOLD = 20; // credits — a rough "worth checking before your next big send" line, not a hard cutoff Arkesel enforces
+
   if (curUser?.role === "Teacher") {
     return <TeacherDashboard school={school} students={students} grades={grades} attendance={attendance}
       examSchedule={examSchedule} mockExams={mockExams} curUser={curUser}/>;
@@ -1138,6 +1146,15 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
         <h2 style={{ fontSize:22,fontWeight:700,color:"#0f172a",margin:0 }}>Good day, {curUser?.name.split(" ")[0]} 👋</h2>
         <p style={{ color:"#64748b",margin:"4px 0 0",fontSize:13 }}>{school.name} · {school.currentTerm} {school.currentYear}</p>
       </div>
+
+      {smsBalanceInfo?.estimatedBalance!=null && smsBalanceInfo.estimatedBalance<LOW_BALANCE_THRESHOLD && (
+        <div style={{ background:"#fef3c7",border:"1px solid #fcd34d",borderRadius:10,padding:"12px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:10 }}>
+          <span style={{ fontSize:18 }}>📱</span>
+          <div style={{ fontSize:13,color:"#92400e" }}>
+            <strong>SMS balance running low</strong> — estimated {smsBalanceInfo.estimatedBalance} credits left. Top up your Arkesel account before your next bulk send, or it may partly fail partway through.
+          </div>
+        </div>
+      )}
 
       {/* ALERTS */}
       {(absentAlerts.length>0||overdueBooks.length>0||noStock.length>0)&&(
@@ -1193,11 +1210,19 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
           <h3 style={{ margin:"0 0 12px",fontSize:15,color:"#0f172a" }}>💸 Fee Arrears</h3>
           {feeAlerts.slice(0,6).map(s=>{
             const balances = computeStudentFeeBalances(s, (feeTypes||[]).filter(ft=>ft.active), fees, school.termStartDate);
-            const totalOwed = balances.reduce((sum,b)=>sum+Math.max(0,b.balance),0);
+            const owedBalances = balances.filter(b=>b.balance>0);
+            const totalOwed = owedBalances.reduce((sum,b)=>sum+b.balance,0);
             return (
-            <div key={s.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f1f5f9",fontSize:13 }}>
-              <span>{s.name} <span style={{ color:"#9ca3af",fontSize:11 }}>({s.class})</span></span>
-              <span style={{ color:"#dc2626",fontWeight:600 }}>{formatGHS(totalOwed)}</span>
+            <div key={s.id} style={{ padding:"5px 0",borderBottom:"1px solid #f1f5f9" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",fontSize:13 }}>
+                <span>{s.name} <span style={{ color:"#9ca3af",fontSize:11 }}>({s.class})</span></span>
+                <span style={{ color:"#dc2626",fontWeight:600 }}>{formatGHS(totalOwed)}</span>
+              </div>
+              {owedBalances.length>1 && (
+                <div style={{ fontSize:10,color:"#9ca3af",marginTop:1 }}>
+                  {owedBalances.map(b=>`${b.name}: ${formatGHS(b.balance)}`).join(" · ")}
+                </div>
+              )}
             </div>
           );})}
           {feeAlerts.length===0&&<p style={{ color:"#16a34a",fontSize:13 }}>✅ All fees cleared!</p>}
@@ -4267,7 +4292,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   return (
     <div>
       <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>⚙️ Settings</h2>
-      <Tabs tabs={[{key:"school",label:"🏫 School Profile"},{key:"classes",label:"🏷️ Classes & Subjects"},{key:"feetypes",label:"💵 Fee Types"},{key:"security",label:"🔐 Security"},{key:"data",label:"💾 Data & Backup"},{key:"cloud",label:"☁️ Cloud Sync"},{key:"sms",label:"📱 Bulk SMS"},{key:"licence",label:"🔑 Licence"}]} active={tab} onChange={setTab}/>
+      <Tabs tabs={[{key:"school",label:"🏫 School Profile"},{key:"classes",label:"🏷️ Classes & Subjects"},{key:"feetypes",label:"💵 Fee Types"},{key:"security",label:"🔐 Security"},{key:"data",label:"💾 Data & Backup"},{key:"cloud",label:"☁️ Cloud Sync"},{key:"sms",label:"📱 Bulk SMS"},{key:"licence",label:"🔑 Licence"},{key:"about",label:"ℹ️ About"},{key:"terms",label:"📜 Terms of Use"}]} active={tab} onChange={setTab}/>
 
       {tab==="school"&&(
         <Card style={{ padding:24,maxWidth:580 }}>
@@ -4614,6 +4639,74 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
           ))}
           <div style={{ marginTop:14,background:"#fffbeb",borderRadius:8,padding:12,fontSize:12,color:"#92400e" }}>
             📞 Renew or upgrade: <strong>0597147460</strong> | <strong>eagleeyefx1@gmail.com</strong>
+          </div>
+        </Card>
+      )}
+
+      {tab==="about"&&(
+        <Card style={{ padding:24,maxWidth:600 }}>
+          <div style={{ textAlign:"center",marginBottom:20 }}>
+            <div style={{ fontSize:40 }}>🏫</div>
+            <h2 style={{ margin:"8px 0 2px",fontSize:20 }}>EduSmart School Manager</h2>
+            <p style={{ margin:0,color:"#64748b",fontSize:13 }}>Version 6.0.2</p>
+          </div>
+          <p style={{ fontSize:13,lineHeight:1.7,color:"#374151" }}>
+            EduSmart is an all-in-one school management system built for Ghanaian private basic schools —
+            students, staff, attendance, grades, exams, promotion, flexible fee billing, payroll, library,
+            timetables, and parent communication by WhatsApp and SMS, all in one place. It works fully offline
+            on a single computer, or synced automatically across every device your school uses.
+          </p>
+          <h4 style={{ fontSize:13,margin:"18px 0 8px" }}>Developed by</h4>
+          <p style={{ fontSize:13,color:"#374151",margin:0 }}>EagleEye Software Solutions</p>
+          <p style={{ fontSize:13,color:"#374151",margin:0 }}>Gilbert Oscar Prah</p>
+          <p style={{ fontSize:13,color:"#374151",margin:0 }}>Eikwe, Western Region, Ghana</p>
+          <h4 style={{ fontSize:13,margin:"18px 0 8px" }}>Contact & Support</h4>
+          <p style={{ fontSize:13,color:"#374151",margin:0 }}>📧 aifarms101@gmail.com</p>
+          <p style={{ fontSize:13,color:"#374151",margin:0 }}>📱 WhatsApp 0597147460</p>
+          <div style={{ marginTop:18,paddingTop:14,borderTop:"1px solid #e5e7eb",fontSize:11,color:"#94a3b8" }}>
+            © {new Date().getFullYear()} EagleEye Software Solutions. All rights reserved.
+          </div>
+        </Card>
+      )}
+
+      {tab==="terms"&&(
+        <Card style={{ padding:24,maxWidth:700 }}>
+          <h3 style={{ margin:"0 0 4px",fontSize:16 }}>Terms of Use</h3>
+          <p style={{ fontSize:11,color:"#94a3b8",marginBottom:18 }}>Last updated: August 2026 · EduSmart School Manager, v6.0.2</p>
+          <div style={{ fontSize:13,lineHeight:1.8,color:"#374151" }}>
+
+            <h4 style={{ fontSize:13,margin:"16px 0 6px" }}>1. Acceptance</h4>
+            <p style={{ margin:"0 0 10px" }}>By installing or using EduSmart School Manager ("EduSmart"), your school agrees to these Terms of Use. If you do not agree, please do not use the software.</p>
+
+            <h4 style={{ fontSize:13,margin:"16px 0 6px" }}>2. Licence</h4>
+            <p style={{ margin:"0 0 10px" }}>EduSmart is licensed, not sold. Each licence key is issued to a single school and is not transferable to another institution without the developer's consent. The licence permits use of the software for that school's own internal administration; it does not permit resale, sublicensing, or redistribution of the software itself.</p>
+
+            <h4 style={{ fontSize:13,margin:"16px 0 6px" }}>3. Your Data Belongs to You</h4>
+            <p style={{ margin:"0 0 10px" }}>All student, staff, financial, and academic data entered into EduSmart belongs to your school. EagleEye Software Solutions does not claim ownership of your data and will not sell, share, or use it for any purpose other than providing the software's own functionality (including, where Cloud Sync is enabled, storing it securely to make it available across your school's own devices).</p>
+
+            <h4 style={{ fontSize:13,margin:"16px 0 6px" }}>4. Your Responsibility for Data</h4>
+            <p style={{ margin:"0 0 10px" }}>Your school is responsible for the accuracy of data entered into EduSmart, for keeping PINs and licence keys confidential, and for maintaining its own backups (Settings → Data & Backup). While Cloud Sync provides redundancy across devices, it is not a substitute for your own periodic backup exports.</p>
+
+            <h4 style={{ fontSize:13,margin:"16px 0 6px" }}>5. Third-Party Services</h4>
+            <p style={{ margin:"0 0 10px" }}>EduSmart's WhatsApp messaging and SMS features rely on third-party services (WhatsApp, and — where configured — Arkesel) that EagleEye Software Solutions does not own or control. Your school is responsible for its own Arkesel account, API credentials, and any charges billed by that provider. EagleEye Software Solutions is not responsible for message delivery failures, costs, or outages caused by these third-party services.</p>
+
+            <h4 style={{ fontSize:13,margin:"16px 0 6px" }}>6. No Warranty</h4>
+            <p style={{ margin:"0 0 10px" }}>EduSmart is provided "as is," without warranty of any kind, express or implied. While built and tested with care, EagleEye Software Solutions does not guarantee the software will be error-free or uninterrupted. Calculations (fees, payroll, grades) are provided as a tool to assist school administration — your school remains responsible for verifying figures before relying on them for official records or payments.</p>
+
+            <h4 style={{ fontSize:13,margin:"16px 0 6px" }}>7. Limitation of Liability</h4>
+            <p style={{ margin:"0 0 10px" }}>To the fullest extent permitted by law, EagleEye Software Solutions is not liable for any indirect, incidental, or consequential loss arising from use of EduSmart, including but not limited to data loss, missed communications, or financial discrepancies. Your school's use of the software is at its own risk.</p>
+
+            <h4 style={{ fontSize:13,margin:"16px 0 6px" }}>8. Support & Updates</h4>
+            <p style={{ margin:"0 0 10px" }}>Support is provided on a reasonable-effort basis via the contact details in the About section. EagleEye Software Solutions may release updates to EduSmart from time to time; some updates may require running a provided database migration for full functionality.</p>
+
+            <h4 style={{ fontSize:13,margin:"16px 0 6px" }}>9. Changes to These Terms</h4>
+            <p style={{ margin:"0 0 10px" }}>These terms may be updated from time to time. Continued use of EduSmart after an update constitutes acceptance of the revised terms.</p>
+
+            <h4 style={{ fontSize:13,margin:"16px 0 6px" }}>10. Governing Law</h4>
+            <p style={{ margin:"0 0 10px" }}>These terms are governed by the laws of the Republic of Ghana.</p>
+
+            <h4 style={{ fontSize:13,margin:"16px 0 6px" }}>11. Contact</h4>
+            <p style={{ margin:"0 0 10px" }}>Questions about these terms: aifarms101@gmail.com or WhatsApp 0597147460.</p>
           </div>
         </Card>
       )}
