@@ -211,7 +211,7 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
     // in use — never the secret itself.
     async getSmsStatus() {
       const { data, error } = await supabaseClient.from("sms_credentials").select("sender_id, estimated_balance, balance_updated_at").maybeSingle();
-      if (error) throw error;
+      if (error) throw error; // a real problem (e.g. a missing column from a skipped migration) — the caller must NOT treat this the same as "no credentials saved"
       return data ? { configured: true, senderId: data.sender_id, estimatedBalance: data.estimated_balance, balanceUpdatedAt: data.balance_updated_at } : { configured: false };
     },
 

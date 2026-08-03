@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "6.0.0";
+const APP_VERSION = "6.0.1";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -4478,7 +4478,8 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
           ) : (
             <>
               <div style={{ marginBottom:16 }}>
-                <Badge text={smsStatus.configured?`✅ Connected — Sender ID: ${smsStatus.senderId}`:"Not set up yet"} color={smsStatus.configured?"#166534":"#92400e"} bg={smsStatus.configured?"#dcfce7":"#fef3c7"}/>
+                <Badge text={smsStatus.configured?`✅ Connected — Sender ID: ${smsStatus.senderId}`:smsStatus.error?`⚠️ Couldn't check status`:"Not set up yet"} color={smsStatus.configured?"#166534":smsStatus.error?"#991b1b":"#92400e"} bg={smsStatus.configured?"#dcfce7":smsStatus.error?"#fee2e2":"#fef3c7"}/>
+                {smsStatus.error && <p style={{ fontSize:11,color:"#991b1b",marginTop:6 }}>{smsStatus.error} — if you've saved credentials before, they're likely still there; this is a status-check problem, not necessarily lost data. Make sure all SMS migrations have been run in Supabase.</p>}
               </div>
 
               {smsStatus.configured && (

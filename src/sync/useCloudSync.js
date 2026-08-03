@@ -259,7 +259,13 @@ export function useCloudSync({ appState, appSetters }) {
   const getSmsStatus = useCallback(async () => {
     if (!enabled) return { configured: false };
     try { return await remoteRef.current.getSmsStatus(); }
-    catch (e) { return { configured: false }; }
+    catch (e) {
+      // A real error (e.g. a column missing because a migration
+      // wasn't run) must not look identical to "no credentials saved
+      // yet" — that ambiguity is exactly what made this confusing to
+      // debug in the first place.
+      return { configured: false, error: e?.message || "Couldn't check SMS status" };
+    }
   }, [enabled]);
 
   const setSmsBalance = useCallback(async (balance) => {
