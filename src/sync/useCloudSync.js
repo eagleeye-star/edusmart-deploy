@@ -22,7 +22,7 @@ import {
 } from "./cloudSyncSetup.js";
 import { generateConnectCode, parseConnectCode } from "./connectCode.js";
 
-const SYNCED_TABLES = ["students", "attendance", "grades", "fees", "staff", "fee_types"];
+const SYNCED_TABLES = ["students", "attendance", "grades", "fees", "staff", "fee_types", "payroll", "books", "borrows"];
 const FLUSH_INTERVAL_MS = 8000;
 const JOIN_TIMEOUT_MS = 20000;
 
@@ -209,7 +209,12 @@ export function useCloudSync({ appState, appSetters }) {
     );
     try {
       const schoolInfo = await remoteRef.current.fetchSchoolInfo();
-      appSetters.school(prev => ({ ...prev, ...schoolInfo }));
+      const { timetablesJson, ...schoolFields } = schoolInfo;
+      appSetters.school(prev => ({ ...prev, ...schoolFields }));
+      // timetables lives in its own top-level app state, not nested
+      // inside school — routing it there directly avoids it silently
+      // landing somewhere the Timetable UI never actually reads from.
+      if (timetablesJson && appSetters.timetables) appSetters.timetables(timetablesJson);
     } catch (e) { /* non-fatal — school name etc. can be filled in later */ }
     // Populate local state directly (not via mergeIntoAppState's
     // client_id-matching logic, since there's no existing local data
@@ -220,6 +225,9 @@ export function useCloudSync({ appState, appSetters }) {
     if (pulled.grades?.length) appSetters.grades(pulled.grades.map(s => ({ ...s, id: s.client_id })));
     if (pulled.fees?.length) appSetters.fees(pulled.fees.map(s => ({ ...s, id: s.client_id })));
     if (pulled.fee_types?.length) appSetters.fee_types(pulled.fee_types.map(s => ({ ...s, id: s.client_id })));
+    if (pulled.payroll?.length) appSetters.payroll(pulled.payroll.map(s => ({ ...s, id: s.client_id })));
+    if (pulled.books?.length) appSetters.books(pulled.books.map(s => ({ ...s, id: s.client_id })));
+    if (pulled.borrows?.length) appSetters.borrows(pulled.borrows.map(s => ({ ...s, id: s.client_id })));
     skipNextInitialPull.current = true;
     setEnabled(true);
     return pulled;
@@ -252,6 +260,18 @@ export function useCloudSync({ appState, appSetters }) {
     if (!enabled) return { configured: false };
     try { return await remoteRef.current.getSmsStatus(); }
     catch (e) { return { configured: false }; }
+  }, [enabled]);
+
+  const setSmsBalance = useCallback(async (balance) => {
+    const link = getDeviceLink(window.localStorage);
+    if (!link) throw new Error("Cloud sync isn't enabled on this device.");
+    await remoteRef.current.setSmsBalance(link.schoolId, balance);
+  }, []);
+
+  const fetchSmsLog = useCallback(async () => {
+    if (!enabled) return [];
+    try { return await remoteRef.current.fetchSmsLog(); }
+    catch (e) { return []; }
   }, [enabled]);
 
   const sendBulkSms = useCallback(async (recipients, message, sentBy) => {
@@ -303,11 +323,34 @@ export function useCloudSync({ appState, appSetters }) {
     catch (e) { return null; }
   }, [enabled]);
 
+  // Timetables change rarely (once a term, typically) compared to
+  // attendance/grades, so this deliberately doesn't need constant
+  // background sync — push whenever it changes locally, pull fresh
+  // whenever the user actually opens the Timetable section. Simpler
+  // and safer than building full realtime sync for something that
+  // doesn't need that responsiveness.
+  const pushTimetablesToCloud = useCallback(async (timetablesObj) => {
+    if (!enabled) return;
+    const link = getDeviceLink(window.localStorage);
+    if (!link) return;
+    try { await remoteRef.current.updateSchoolInfo(link.schoolId, { timetablesJson: timetablesObj }); }
+    catch (e) { /* non-fatal — local copy is still correct either way */ }
+  }, [enabled]);
+
+  const fetchTimetablesFromCloud = useCallback(async () => {
+    if (!enabled) return null;
+    try {
+      const info = await remoteRef.current.fetchSchoolInfo();
+      return info.timetablesJson || null;
+    } catch (e) { return null; }
+  }, [enabled]);
+
   return {
     enabled, status, writeThrough, writeThroughBulk, verifyPin,
     enableNewSchool, joinWithConnectCode, linkToExistingSchool,
     pushLicenceToCloud, checkForLicenceUpdate,
     getConnectCode, disable, syncNow,
-    saveSmsCredentials, getSmsStatus, sendBulkSms,
+    saveSmsCredentials, getSmsStatus, sendBulkSms, setSmsBalance, fetchSmsLog,
+    pushTimetablesToCloud, fetchTimetablesFromCloud,
   };
 }

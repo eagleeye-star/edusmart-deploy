@@ -43,6 +43,12 @@ const FIELD_MAPS = {
   grades:     { studentId: "student_id", enteredBy: "entered_by" },
   fees:       { studentId: "student_id", enteredBy: "entered_by", receiptNo: "receipt_no", feeTypeId: "fee_type_id" },
   fee_types:  { defaultAmount: "default_amount" },
+  payroll:    { staffId: "staff_id", overTime: "over_time", ssnitEmployee: "ssnit_employee",
+                ssnitEmployer: "ssnit_employer", absenceDeductions: "absence_deductions",
+                netPay: "net_pay", processedBy: "processed_by" },
+  books:      {},
+  borrows:    { bookId: "book_id", borrowerId: "borrower_id", borrowerType: "borrower_type",
+                borrowDate: "borrow_date", dueDate: "due_date", returnDate: "return_date", enteredBy: "entered_by" },
 };
 
 function toDbFields(table, obj) {
@@ -150,6 +156,7 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
         name: data.name, address: data.address, phone: data.phone, email: data.email,
         motto: data.motto, currentTerm: data.current_term, currentYear: data.current_year,
         principalName: data.principal_name, logo: data.logo_url, termStartDate: data.term_start_date,
+        timetablesJson: data.timetables_json,
       };
     },
 
@@ -162,6 +169,7 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
         address: schoolInfo.address, phone: schoolInfo.phone, email: schoolInfo.email,
         motto: schoolInfo.motto, current_term: schoolInfo.currentTerm, current_year: schoolInfo.currentYear,
         principal_name: schoolInfo.principalName, logo_url: schoolInfo.logo, term_start_date: schoolInfo.termStartDate,
+        timetables_json: schoolInfo.timetablesJson,
       }).eq("id", schoolId);
       if (error) throw error;
     },
@@ -202,9 +210,19 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
     // "Connected" vs "Not set up" in Settings) and what sender ID is
     // in use — never the secret itself.
     async getSmsStatus() {
-      const { data, error } = await supabaseClient.from("sms_credentials").select("sender_id").maybeSingle();
+      const { data, error } = await supabaseClient.from("sms_credentials").select("sender_id, estimated_balance, balance_updated_at").maybeSingle();
       if (error) throw error;
-      return data ? { configured: true, senderId: data.sender_id } : { configured: false };
+      return data ? { configured: true, senderId: data.sender_id, estimatedBalance: data.estimated_balance, balanceUpdatedAt: data.balance_updated_at } : { configured: false };
+    },
+
+    // Lets the school (re)set their known-correct balance after
+    // checking their real Arkesel dashboard — from that point forward,
+    // every send's actual credits_used gets deducted automatically.
+    async setSmsBalance(schoolId, balance) {
+      const { error } = await supabaseClient.from("sms_credentials").update({
+        estimated_balance: balance, balance_updated_at: new Date().toISOString(),
+      }).eq("school_id", schoolId);
+      if (error) throw error;
     },
 
     // Calls the send-sms Edge Function — the only place Hubtel's API
@@ -217,6 +235,20 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
       });
       if (error) throw error;
       return data;
+    },
+
+    // Read-only history of every actual SMS attempt — sms_log is
+    // written only by the send-sms Edge Function, never by the
+    // client directly, so this is a simple fetch rather than part of
+    // the bidirectional sync pattern the other tables use.
+    async fetchSmsLog(limit = 200) {
+      const { data, error } = await supabaseClient
+        .from("sms_log").select("*").order("created_at", { ascending: false }).limit(limit);
+      if (error) throw error;
+      return (data || []).map(r => ({
+        id: r.id, recipient: r.recipient, message: r.message, status: r.status,
+        error: r.error, sentBy: r.sent_by, createdAt: r.created_at,
+      }));
     },
 
     subscribe(table, onRow) {

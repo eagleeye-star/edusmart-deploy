@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "5.8.1";
+const APP_VERSION = "6.0.0";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -526,8 +526,8 @@ export default function EduSmart() {
   // here so useCloudSync's internals can stay consistently keyed by
   // table name throughout.
   const cloudSync = useCloudSync({
-    appState: { students, attendance, grades, fees, staff: users, school, fee_types: feeTypes },
-    appSetters: { students: setStudents, attendance: setAttendance, grades: setGrades, fees: setFees, staff: setUsers, school: setSchool, fee_types: setFeeTypes },
+    appState: { students, attendance, grades, fees, staff: users, school, fee_types: feeTypes, payroll, books, borrows },
+    appSetters: { students: setStudents, attendance: setAttendance, grades: setGrades, fees: setFees, staff: setUsers, school: setSchool, fee_types: setFeeTypes, payroll: setPayroll, books: setBooks, borrows: setBorrows, timetables: setTimetables },
   });
 
   // Save everything back to local storage shortly after any change.
@@ -584,6 +584,22 @@ export default function EduSmart() {
     const interval = setInterval(check, 15000);
     return () => clearInterval(interval);
   }, [cloudSync?.enabled, licInfo?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Timetables push to the cloud whenever they change locally —
+  // debounced the same way local storage saves are, since generating
+  // or deleting a class's timetable can happen in quick succession.
+  // Pull happens separately, on-demand, when the Timetable section is
+  // actually opened (see the Timetable component) — this data changes
+  // rarely enough that constant background polling isn't warranted.
+  const timetablesPushTimer = useRef(null);
+  useEffect(() => {
+    if (!cloudSync?.enabled) return;
+    if (timetablesPushTimer.current) clearTimeout(timetablesPushTimer.current);
+    timetablesPushTimer.current = setTimeout(() => {
+      cloudSync.pushTimetablesToCloud(timetables);
+    }, 1000);
+    return () => { if (timetablesPushTimer.current) clearTimeout(timetablesPushTimer.current); };
+  }, [timetables, cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addAudit = useCallback((action, sec) => {
     if (!curUser) return;
@@ -1594,7 +1610,7 @@ function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,
 function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser,classes,initialSearch,cloudSync }) {
   const [filterRole,setFilterRole]=useState("");
   const [showForm,setShowForm]=useState(false); const [editId,setEditId]=useState(null);
-  const blank = { name:"",role:"Teacher",pin:"",code:"",email:"",classAssigned:"",active:true,salary:1500,transport:150,housing:0,ssnit:true,photo:"" };
+  const blank = { name:"",role:"Teacher",pin:"",code:"",email:"",phone:"",classAssigned:"",active:true,salary:1500,transport:150,housing:0,ssnit:true,photo:"" };
   const [form,setForm]=useState(blank);
 
   const roleColors = { Admin:"#7c3aed",Headmaster:"#1d4ed8",HOD:"#0369a1",Teacher:"#059669","Account Office":"#d97706",Librarian:"#6d28d9","Non-Teaching Staff":"#6b7280" };
@@ -1641,6 +1657,7 @@ function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser,classes,
             <Row label="Role"><select value={form.role} onChange={e=>setForm(p=>({...p,role:e.target.value}))} style={inp}>{ROLES.map(r=><option key={r}>{r}</option>)}</select></Row>
             <Row label="PIN (4 digits)"><input type="password" value={form.pin} onChange={e=>setForm(p=>({...p,pin:e.target.value}))} maxLength={4} style={inp}/></Row>
             <Row label="Email"><input value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))} style={inp}/></Row>
+            <Row label="Phone"><input value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))} style={inp} placeholder="e.g. 0247064786"/></Row>
             {form.role==="Teacher"&&<Row label="Class"><select value={form.classAssigned||""} onChange={e=>setForm(p=>({...p,classAssigned:e.target.value}))} style={inp}><option value="">None</option>{classes.map(c=><option key={c}>{c}</option>)}</select></Row>}
             <Row label="Base Salary (GH₵)"><input type="number" value={form.salary||0} onChange={e=>setForm(p=>({...p,salary:+e.target.value}))} style={inp}/></Row>
             <Row label="Transport (GH₵)"><input type="number" value={form.transport||0} onChange={e=>setForm(p=>({...p,transport:+e.target.value}))} style={inp}/></Row>
@@ -1670,7 +1687,7 @@ function Staff({ users,setUsers,notify,addAudit,failedLogins,unlockUser,classes,
               <td style={{ padding:"8px 12px" }}><Badge text={u.active?"Active":"Inactive"} color={u.active?"#166534":"#991b1b"} bg={u.active?"#dcfce7":"#fee2e2"}/></td>
               <td style={{ padding:"8px 12px" }}>{locked?<Badge text="LOCKED" color="#991b1b" bg="#fee2e2"/>:<Badge text="OK" color="#166534" bg="#dcfce7"/>}</td>
               <td style={{ padding:"8px 12px",display:"flex",gap:4 }}>
-                <button onClick={()=>{setEditId(u.id);setForm({name:u.name,role:u.role,pin:u.pin,code:u.code,email:u.email,classAssigned:u.classAssigned||"",active:u.active,salary:u.salary||0,transport:u.transport||0,housing:u.housing||0,ssnit:u.ssnit!==false,photo:u.photo||""});setShowForm(true);}} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8" }}>Edit</button>
+                <button onClick={()=>{setEditId(u.id);setForm({name:u.name,role:u.role,pin:u.pin,code:u.code,email:u.email,phone:u.phone||"",classAssigned:u.classAssigned||"",active:u.active,salary:u.salary||0,transport:u.transport||0,housing:u.housing||0,ssnit:u.ssnit!==false,photo:u.photo||""});setShowForm(true);}} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8" }}>Edit</button>
                 {locked&&<button onClick={()=>unlockUser(u.id)} style={{ ...btnSm,background:"#dcfce7",color:"#166534" }}>Unlock</button>}
               </td>
             </tr>
@@ -2570,7 +2587,7 @@ function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school
 }
 
 // ─── PAYROLL ─────────────────────────────────────────────────
-function Payroll({ payroll,setPayroll,users,curUser,notify,addAudit }) {
+function Payroll({ payroll,setPayroll,users,curUser,notify,addAudit,cloudSync }) {
   const [tab,setTab]=useState("process");
   const [selStaff,setSelStaff]=useState("");
   const [selMonth,setSelMonth]=useState("January"); const [selYear,setSelYear]=useState("2025");
@@ -2603,6 +2620,7 @@ function Payroll({ payroll,setPayroll,users,curUser,notify,addAudit }) {
     if(exists){ notify("Payroll already processed for this period","error"); return; }
     const entry={ id:uid("PAY"),staffId:selStaff,month:selMonth,year:selYear,...preview,status:"paid",processedBy:curUser.code,date:todayStr() };
     setPayroll(p=>[...p,entry]);
+    cloudSync?.writeThrough("payroll", entry);
     addAudit(`Payroll: ${su?.name} ${selMonth} ${selYear}`,"Payroll");
     notify("Payroll processed ✅"); setExtras({overtime:0,substitution:0,loans:0,absenceDays:0,responsibility:0});
   };
@@ -2717,7 +2735,7 @@ function Payroll({ payroll,setPayroll,users,curUser,notify,addAudit }) {
 }
 
 // ─── LIBRARY ─────────────────────────────────────────────────
-function Library({ books,setBooks,borrows,setBorrows,students,users,curUser,notify,addAudit }) {
+function Library({ books,setBooks,borrows,setBorrows,students,users,curUser,notify,addAudit,cloudSync }) {
   const [tab,setTab]=useState("books");
   const [search,setSearch]=useState("");
   const [showBook,setShowBook]=useState(false); const [editBk,setEditBk]=useState(null);
@@ -2729,8 +2747,17 @@ function Library({ books,setBooks,borrows,setBorrows,students,users,curUser,noti
 
   const saveBook=()=>{
     if(!bf.title){ notify("Title required","error"); return; }
-    if(editBk){ setBooks(p=>p.map(b=>b.id===editBk?{...b,...bf}:b)); notify("Book updated"); }
-    else { setBooks(p=>[...p,{id:uid("BK"),...bf}]); addAudit(`Book added: ${bf.title}`,"Library"); notify("Book added"); }
+    if(editBk){
+      const updated={...books.find(b=>b.id===editBk),...bf};
+      setBooks(p=>p.map(b=>b.id===editBk?updated:b));
+      cloudSync?.writeThrough("books", updated);
+      notify("Book updated");
+    } else {
+      const newBook={id:uid("BK"),...bf};
+      setBooks(p=>[...p,newBook]);
+      cloudSync?.writeThrough("books", newBook);
+      addAudit(`Book added: ${bf.title}`,"Library"); notify("Book added");
+    }
     setShowBook(false); setEditBk(null); setBf(bkBlank);
   };
 
@@ -2738,16 +2765,27 @@ function Library({ books,setBooks,borrows,setBorrows,students,users,curUser,noti
     if(!borForm.bookId||!borForm.borrowerId||!borForm.dueDate){ notify("All fields required","error"); return; }
     const bk=books.find(b=>b.id===borForm.bookId);
     if(!bk||bk.available<1){ notify("No copies available","error"); return; }
-    setBorrows(p=>[...p,{id:uid("BOR"),...borForm,returnDate:null,enteredBy:curUser.code}]);
-    setBooks(p=>p.map(b=>b.id===borForm.bookId?{...b,available:b.available-1}:b));
+    const newBorrow={id:uid("BOR"),...borForm,returnDate:null,enteredBy:curUser.code};
+    setBorrows(p=>[...p,newBorrow]);
+    cloudSync?.writeThrough("borrows", newBorrow);
+    const updatedBook={...bk,available:bk.available-1};
+    setBooks(p=>p.map(b=>b.id===borForm.bookId?updatedBook:b));
+    cloudSync?.writeThrough("books", updatedBook);
     addAudit(`Borrowed: ${bk.title}`,"Library"); notify("Book issued ✅");
     setShowBorrow(false); setBorForm({bookId:"",borrowerId:"",borrowerType:"Student",borrowDate:todayStr(),dueDate:""});
   };
 
   const returnBook=id=>{
     const bor=borrows.find(b=>b.id===id); if(!bor) return;
-    setBorrows(p=>p.map(b=>b.id===id?{...b,returnDate:todayStr()}:b));
-    setBooks(p=>p.map(b=>b.id===bor.bookId?{...b,available:b.available+1}:b));
+    const updatedBorrow={...bor,returnDate:todayStr()};
+    setBorrows(p=>p.map(b=>b.id===id?updatedBorrow:b));
+    cloudSync?.writeThrough("borrows", updatedBorrow);
+    const bk=books.find(b=>b.id===bor.bookId);
+    if(bk){
+      const updatedBook={...bk,available:bk.available+1};
+      setBooks(p=>p.map(b=>b.id===bor.bookId?updatedBook:b));
+      cloudSync?.writeThrough("books", updatedBook);
+    }
     addAudit(`Returned: book ${id}`,"Library"); notify("Book returned ✅");
   };
 
@@ -2843,7 +2881,19 @@ function Library({ books,setBooks,borrows,setBorrows,students,users,curUser,noti
 }
 
 // ─── TIMETABLE ───────────────────────────────────────────────
-function Timetable({ timetables,setTimetables,curUser }) {
+function Timetable({ timetables,setTimetables,curUser,cloudSync }) {
+  // Pull the latest timetables from the cloud whenever this section is
+  // opened — this data changes rarely enough (once a term, typically)
+  // that on-demand refresh here is simpler and safer than constant
+  // background polling, while still catching a change made on another
+  // device before you start editing.
+  useEffect(() => {
+    if (!cloudSync?.enabled) return;
+    cloudSync.fetchTimetablesFromCloud().then(cloudTimetables => {
+      if (cloudTimetables) setTimetables(cloudTimetables);
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const isTeacher=curUser?.role==="Teacher"; const myClass=isTeacher?curUser?.classAssigned:null;
   const [selClass,setSelClass]=useState(myClass||"Class 6A");
   const [editMode,setEditMode]=useState(false);
@@ -2943,7 +2993,7 @@ function Timetable({ timetables,setTimetables,curUser }) {
 }
 
 // ─── COMMUNICATION ───────────────────────────────────────────
-function Communication({ students,school,curUser,fees,attendance,classes,feeTypes,addAudit,notify,cloudSync }) {
+function Communication({ students,school,curUser,fees,attendance,classes,feeTypes,addAudit,notify,cloudSync,users }) {
   const [tab,setTab]=useState("whatsapp");
   const [templateType,setTemplateType]=useState("fee_reminder");
   const [selStu,setSelStu]=useState("");
@@ -3088,53 +3138,81 @@ ${school.principalName||"The Principal"}`,
   const [letterPreview,setLetterPreview]=useState("");
 
   // ─── BULK SEND ──────────────────────────────────────────────
+  const [bulkAudience,setBulkAudience]=useState("students"); // "students" | "staff"
   const [bulkFilterType,setBulkFilterType]=useState("class");
   const [bulkFilterClass,setBulkFilterClass]=useState(classes[0]);
   const [bulkFilterFeeType,setBulkFilterFeeType]=useState(feeTypes?.[0]?.id||"");
+  const [bulkFilterRole,setBulkFilterRole]=useState("all");
   const [bulkTemplateType,setBulkTemplateType]=useState("fee_reminder");
   const [bulkCustomMessage,setBulkCustomMessage]=useState("");
   const [bulkChannel,setBulkChannel]=useState("whatsapp"); // "whatsapp" | "sms"
   const [bulkQueue,setBulkQueue]=useState(null); // null = not started; array once built
   const [bulkIndex,setBulkIndex]=useState(0);
-  const [bulkResults,setBulkResults]=useState({}); // { [studentId]: "sent" | "skipped" }
+  const [bulkResults,setBulkResults]=useState({}); // { [id]: "sent" | "skipped" }
   const [smsConfirming,setSmsConfirming]=useState(false);
   const [smsSending,setSmsSending]=useState(false);
   const [smsSendResult,setSmsSendResult]=useState(null);
+  const [smsLog,setSmsLog]=useState([]);
+  const [smsLogLoading,setSmsLogLoading]=useState(false);
+  const [historyFilter,setHistoryFilter]=useState("all"); // "all" | "sent" | "failed"
 
-  const bulkCandidates = (() => {
-    if (bulkFilterType === "all") return activeStudents;
-    if (bulkFilterType === "class") return activeStudents.filter(s=>s.class===bulkFilterClass);
-    if (bulkFilterType === "absent") {
-      return activeStudents.filter(s=>{
-        const recent = attendance.filter(a=>a.studentId===s.id).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3);
-        return recent.length>=3 && recent.every(a=>a.status==="Absent");
-      });
+  useEffect(()=>{
+    if(tab==="history" && cloudSync?.enabled){
+      setSmsLogLoading(true);
+      cloudSync.fetchSmsLog().then(log=>{ setSmsLog(log); setSmsLogLoading(false); });
     }
-    if (bulkFilterType === "arrears") {
-      const ft = (feeTypes||[]).find(f=>f.id===bulkFilterFeeType);
-      if (!ft) return [];
-      return activeStudents.filter(s=>{
-        if (!feeTypeAppliesToStudent(ft, s)) return false;
-        const bal = computeStudentFeeBalances(s, [ft], fees, school.termStartDate)[0];
-        return bal && bal.balance > 0;
-      });
-    }
-    return [];
-  })();
+  },[tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [commSmsStatus,setCommSmsStatus]=useState({ configured:false });
+
+  useEffect(()=>{
+    if(cloudSync?.enabled && cloudSync.getSmsStatus){ cloudSync.getSmsStatus().then(setCommSmsStatus); }
+  },[cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const activeStaff = (users||[]).filter(u=>u.active!==false);
+  const staffRoles = [...new Set(activeStaff.map(u=>u.role))];
+
+  // A unified recipient shape so the rest of Bulk Send (queue
+  // building, WhatsApp links, SMS sending) doesn't need to know
+  // whether it's dealing with a student's parent or a staff member —
+  // both reduce to {id, name, phone, subtitle} before anything else happens.
+  const bulkCandidates = bulkAudience === "staff"
+    ? activeStaff.filter(u=>bulkFilterRole==="all"||u.role===bulkFilterRole)
+        .map(u=>({ id:u.id, name:u.name, phone:u.phone, subtitle:u.role, _raw:u }))
+    : (() => {
+        let list;
+        if (bulkFilterType === "all") list = activeStudents;
+        else if (bulkFilterType === "class") list = activeStudents.filter(s=>s.class===bulkFilterClass);
+        else if (bulkFilterType === "absent") {
+          list = activeStudents.filter(s=>{
+            const recent = attendance.filter(a=>a.studentId===s.id).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3);
+            return recent.length>=3 && recent.every(a=>a.status==="Absent");
+          });
+        } else if (bulkFilterType === "arrears") {
+          const ft = (feeTypes||[]).find(f=>f.id===bulkFilterFeeType);
+          list = !ft ? [] : activeStudents.filter(s=>{
+            if (!feeTypeAppliesToStudent(ft, s)) return false;
+            const bal = computeStudentFeeBalances(s, [ft], fees, school.termStartDate)[0];
+            return bal && bal.balance > 0;
+          });
+        } else list = [];
+        return list.map(s=>({ id:s.id, name:s.name, phone:s.phone, subtitle:s.class, _raw:s }));
+      })();
 
   // A single message-getter covering both pre-built templates and a
-  // free-typed custom message, so the rest of the Bulk Send flow
-  // doesn't need to know which one is in use.
-  const getBulkMessage = (s) => {
+  // free-typed custom message. Templates were written expecting a
+  // student record (s.guardian etc.) — for staff, only Custom Message
+  // is offered (see the UI gating below), so templates only ever run
+  // against student recipients here.
+  const getBulkMessage = (recipient) => {
     if (bulkTemplateType === "custom") return bulkCustomMessage;
-    return templates[bulkTemplateType]?.(s) || "";
+    return templates[bulkTemplateType]?.(recipient._raw) || "";
   };
 
   const buildBulkQueue = () => {
-    const queue = bulkCandidates.map(s => {
-      const msg = getBulkMessage(s);
-      return { studentId: s.id, name: s.name, className: s.class, guardian: s.guardian, phone: s.phone,
-        message: msg, waLink: buildWhatsAppLink(s.phone, msg) };
+    const queue = bulkCandidates.map(r => {
+      const msg = getBulkMessage(r);
+      return { id: r.id, name: r.name, subtitle: r.subtitle, phone: r.phone,
+        message: msg, waLink: buildWhatsAppLink(r.phone, msg) };
     });
     setBulkQueue(queue);
     setBulkIndex(0);
@@ -3143,7 +3221,7 @@ ${school.principalName||"The Principal"}`,
 
   const markBulkResult = (result) => {
     const current = bulkQueue[bulkIndex];
-    setBulkResults(p=>({...p, [current.studentId]: result}));
+    setBulkResults(p=>({...p, [current.id]: result}));
     if (bulkIndex < bulkQueue.length-1) setBulkIndex(i=>i+1);
   };
 
@@ -3151,7 +3229,8 @@ ${school.principalName||"The Principal"}`,
     const sentCount = Object.values(bulkResults).filter(r=>r==="sent").length;
     const skippedCount = Object.values(bulkResults).filter(r=>r==="skipped").length;
     const notReached = bulkQueue.length - sentCount - skippedCount;
-    addAudit&&addAudit(`Bulk WhatsApp (${bulkTemplateType.replace("_"," ")}): ${sentCount} sent, ${skippedCount} skipped, ${notReached} not reached — ${bulkQueue.length} total recipients`,"Communication");
+    const audience = bulkAudience==="staff"?"staff":"parents";
+    addAudit&&addAudit(`Bulk WhatsApp to ${audience} (${bulkTemplateType.replace("_"," ")}): ${sentCount} sent, ${skippedCount} skipped, ${notReached} not reached — ${bulkQueue.length} total recipients`,"Communication");
     notify&&notify(`Bulk send finished — ${sentCount} sent, ${skippedCount} skipped`);
     setBulkQueue(null);
   };
@@ -3160,15 +3239,15 @@ ${school.principalName||"The Principal"}`,
   // so this can be a genuine one-click send — but because it's a paid
   // action with no undo, it's gated behind an explicit confirmation
   // step showing exactly who and what, first.
-  const smsCandidatesWithPhone = bulkCandidates.filter(s=>(s.phone||"").replace(/\D/g,"").length>=9);
+  const smsCandidatesWithPhone = bulkCandidates.filter(r=>(r.phone||"").replace(/\D/g,"").length>=9);
   const smsMessagePreview = smsCandidatesWithPhone[0] ? getBulkMessage(smsCandidatesWithPhone[0]) : "";
   const smsSegmentCount = Math.max(1, Math.ceil((smsMessagePreview||"").length / 160));
 
   const confirmSendSms = async () => {
     setSmsSending(true);
     try {
-      const recipients = smsCandidatesWithPhone.map(s=>formatGhanaPhoneForWhatsApp(s.phone)).filter(Boolean).map(p=>`+${p}`);
-      const messages = smsCandidatesWithPhone.map(s=>getBulkMessage(s));
+      const recipients = smsCandidatesWithPhone.map(r=>formatGhanaPhoneForWhatsApp(r.phone)).filter(Boolean).map(p=>`+${p}`);
+      const messages = smsCandidatesWithPhone.map(r=>getBulkMessage(r));
       // Arkesel's API sends one message per call — if every recipient
       // gets the SAME text (templates personalize per-student, but a
       // custom message is identical for everyone), send it as one
@@ -3179,7 +3258,7 @@ ${school.principalName||"The Principal"}`,
       if (allSame) {
         result = await cloudSync.sendBulkSms(recipients, messages[0], curUser?.code);
       } else {
-        // send one at a time so each student's personalized message is correct
+        // send one at a time so each recipient's personalized message is correct
         const results = [];
         for (let i=0;i<recipients.length;i++){
           const r = await cloudSync.sendBulkSms([recipients[i]], messages[i], curUser?.code);
@@ -3190,7 +3269,8 @@ ${school.principalName||"The Principal"}`,
       setSmsSendResult(result);
       if (result.error) { notify(result.error, "error"); }
       else {
-        addAudit(`Bulk SMS (${bulkTemplateType==="custom"?"custom message":bulkTemplateType.replace("_"," ")}): ${result.sentCount} sent, ${result.failedCount} failed — ${smsCandidatesWithPhone.length} recipients`,"Communication");
+        const audience = bulkAudience==="staff"?"staff":"parents";
+        addAudit(`Bulk SMS to ${audience} (${bulkTemplateType==="custom"?"custom message":bulkTemplateType.replace("_"," ")}): ${result.sentCount} sent, ${result.failedCount} failed — ${smsCandidatesWithPhone.length} recipients`,"Communication");
         notify(`SMS sent — ${result.sentCount} delivered, ${result.failedCount} failed`);
       }
     } catch(e) {
@@ -3203,7 +3283,7 @@ ${school.principalName||"The Principal"}`,
   return (
     <div>
       <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>💬 Parent Communication</h2>
-      <Tabs tabs={[{key:"whatsapp",label:"💬 WhatsApp Templates"},{key:"bulk",label:"📤 Bulk Send"},{key:"letters",label:"📄 Printed Letters"}]} active={tab} onChange={setTab}/>
+      <Tabs tabs={[{key:"whatsapp",label:"💬 WhatsApp Templates"},{key:"bulk",label:"📤 Bulk Send"},{key:"history",label:"🕘 History"},{key:"letters",label:"📄 Printed Letters"}]} active={tab} onChange={setTab}/>
 
       {tab==="whatsapp"&&(
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
@@ -3270,6 +3350,10 @@ ${school.principalName||"The Principal"}`,
             <Card style={{ padding:22,maxWidth:560 }}>
               <h3 style={{ margin:"0 0 6px",fontSize:16 }}>Confirm SMS Send</h3>
               <p style={{ fontSize:12,color:"#64748b",marginBottom:16 }}>This sends real SMS through your Arkesel account and cannot be undone — check this carefully before confirming.</p>
+              <div style={{ background:"#f0f9ff",borderRadius:8,padding:"8px 14px",marginBottom:12,fontSize:13 }}>
+                Sending as: <strong>{commSmsStatus.senderId || "(no sender ID configured)"}</strong>
+                {!commSmsStatus.configured && <span style={{ color:"#dc2626" }}> — set this up in Settings → Bulk SMS first</span>}
+              </div>
               <div style={{ background:"#fef3c7",borderRadius:8,padding:14,marginBottom:16 }}>
                 <div style={{ fontSize:13,marginBottom:6 }}><strong>{smsCandidatesWithPhone.length}</strong> recipient(s) will receive this message{smsCandidatesWithPhone.length<bulkCandidates.length&&` (${bulkCandidates.length-smsCandidatesWithPhone.length} skipped — no usable phone number)`}.</div>
                 <div style={{ fontSize:12,color:"#92400e" }}>{smsMessagePreview.length} characters · {smsSegmentCount} SMS segment{smsSegmentCount>1?"s":""} per message{smsSegmentCount>1&&" (longer messages cost more per recipient)"}</div>
@@ -3288,6 +3372,12 @@ ${school.principalName||"The Principal"}`,
               <p style={{ fontSize:12,color:"#64748b",marginBottom:14 }}>
                 Select who to message and how to reach them.
               </p>
+              <Row label="Who">
+                <div style={{ display:"flex",gap:8 }}>
+                  <button onClick={()=>{setBulkAudience("students");}} style={{ ...btnSm,flex:1,padding:"8px",background:bulkAudience==="students"?"#1e40af":"#f1f5f9",color:bulkAudience==="students"?"#fff":"#374151" }}>👨‍👩‍👧 Parents</button>
+                  <button onClick={()=>{setBulkAudience("staff");setBulkTemplateType("custom");}} style={{ ...btnSm,flex:1,padding:"8px",background:bulkAudience==="staff"?"#1e40af":"#f1f5f9",color:bulkAudience==="staff"?"#fff":"#374151" }}>🧑‍🏫 Staff</button>
+                </div>
+              </Row>
               <Row label="Send Via">
                 <div style={{ display:"flex",gap:8 }}>
                   <button onClick={()=>setBulkChannel("whatsapp")} style={{ ...btnSm,flex:1,padding:"8px",background:bulkChannel==="whatsapp"?"#1e40af":"#f1f5f9",color:bulkChannel==="whatsapp"?"#fff":"#374151" }}>💬 WhatsApp</button>
@@ -3297,38 +3387,56 @@ ${school.principalName||"The Principal"}`,
               {bulkChannel==="sms" && !cloudSync?.enabled && (
                 <div style={{ background:"#fee2e2",borderRadius:8,padding:10,fontSize:12,color:"#991b1b",marginBottom:12 }}>SMS requires Cloud Sync and Arkesel credentials set up first — see Settings → Bulk SMS.</div>
               )}
-              <Row label="Send To">
-                <select value={bulkFilterType} onChange={e=>setBulkFilterType(e.target.value)} style={inp}>
-                  <option value="class">A specific class</option>
-                  <option value="all">All active students</option>
-                  <option value="arrears">Everyone with an outstanding balance</option>
-                  <option value="absent">Everyone absent 3+ days running</option>
-                </select>
-              </Row>
-              {bulkFilterType==="class" && (
-                <Row label="Class"><select value={bulkFilterClass} onChange={e=>setBulkFilterClass(e.target.value)} style={inp}>{classes.map(c=><option key={c}>{c}</option>)}</select></Row>
-              )}
-              {bulkFilterType==="arrears" && (
-                <Row label="Which Fee"><select value={bulkFilterFeeType} onChange={e=>setBulkFilterFeeType(e.target.value)} style={inp}>
-                  {(feeTypes||[]).filter(ft=>ft.active).map(ft=><option key={ft.id} value={ft.id}>{ft.name}</option>)}
+              {bulkAudience==="staff" ? (
+                <Row label="Send To"><select value={bulkFilterRole} onChange={e=>setBulkFilterRole(e.target.value)} style={inp}>
+                  <option value="all">All active staff</option>
+                  {staffRoles.map(r=><option key={r} value={r}>{r}</option>)}
                 </select></Row>
+              ) : (
+                <>
+                  <Row label="Send To">
+                    <select value={bulkFilterType} onChange={e=>setBulkFilterType(e.target.value)} style={inp}>
+                      <option value="class">A specific class</option>
+                      <option value="all">All active students</option>
+                      <option value="arrears">Everyone with an outstanding balance</option>
+                      <option value="absent">Everyone absent 3+ days running</option>
+                    </select>
+                  </Row>
+                  {bulkFilterType==="class" && (
+                    <Row label="Class"><select value={bulkFilterClass} onChange={e=>setBulkFilterClass(e.target.value)} style={inp}>{classes.map(c=><option key={c}>{c}</option>)}</select></Row>
+                  )}
+                  {bulkFilterType==="arrears" && (
+                    <Row label="Which Fee"><select value={bulkFilterFeeType} onChange={e=>setBulkFilterFeeType(e.target.value)} style={inp}>
+                      {(feeTypes||[]).filter(ft=>ft.active).map(ft=><option key={ft.id} value={ft.id}>{ft.name}</option>)}
+                    </select></Row>
+                  )}
+                </>
               )}
-              <Row label="Message"><select value={bulkTemplateType} onChange={e=>setBulkTemplateType(e.target.value)} style={inp}>
-                <option value="fee_reminder">Fee Reminder</option>
-                <option value="absence_alert">Absence Alert</option>
-                <option value="report_ready">Report Card Ready</option>
-                <option value="exam_notice">Exam Notice</option>
-                <option value="pta_invite">PTA Invitation</option>
-                <option value="custom">✏️ Custom Message</option>
-              </select></Row>
-              {bulkTemplateType==="custom" && (
+              {bulkAudience==="staff" ? (
                 <Row label="Your Message">
-                  <textarea value={bulkCustomMessage} onChange={e=>setBulkCustomMessage(e.target.value)} rows={5} style={{ ...inp,width:"100%",fontFamily:"inherit" }} placeholder="Type your message here..."/>
+                  <textarea value={bulkCustomMessage} onChange={e=>setBulkCustomMessage(e.target.value)} rows={5} style={{ ...inp,width:"100%",fontFamily:"inherit" }} placeholder="Type your message to staff here..."/>
                   {bulkChannel==="sms" && <p style={{ fontSize:11,color:"#94a3b8",marginTop:4 }}>{bulkCustomMessage.length} characters · {Math.max(1,Math.ceil(bulkCustomMessage.length/160))} SMS segment(s) per recipient</p>}
                 </Row>
+              ) : (
+                <>
+                  <Row label="Message"><select value={bulkTemplateType} onChange={e=>setBulkTemplateType(e.target.value)} style={inp}>
+                    <option value="fee_reminder">Fee Reminder</option>
+                    <option value="absence_alert">Absence Alert</option>
+                    <option value="report_ready">Report Card Ready</option>
+                    <option value="exam_notice">Exam Notice</option>
+                    <option value="pta_invite">PTA Invitation</option>
+                    <option value="custom">✏️ Custom Message</option>
+                  </select></Row>
+                  {bulkTemplateType==="custom" && (
+                    <Row label="Your Message">
+                      <textarea value={bulkCustomMessage} onChange={e=>setBulkCustomMessage(e.target.value)} rows={5} style={{ ...inp,width:"100%",fontFamily:"inherit" }} placeholder="Type your message here..."/>
+                      {bulkChannel==="sms" && <p style={{ fontSize:11,color:"#94a3b8",marginTop:4 }}>{bulkCustomMessage.length} characters · {Math.max(1,Math.ceil(bulkCustomMessage.length/160))} SMS segment(s) per recipient</p>}
+                    </Row>
+                  )}
+                </>
               )}
               <div style={{ background:"#f0f9ff",borderRadius:8,padding:12,fontSize:13,marginBottom:16 }}>
-                <strong>{bulkCandidates.length}</strong> student(s) match this filter.
+                <strong>{bulkCandidates.length}</strong> {bulkAudience==="staff"?"staff member(s)":"student(s)"} match this filter.
                 {bulkCandidates.length>0 && (()=>{ const noPhone = bulkCandidates.filter(s=>!formatGhanaPhoneForWhatsApp(s.phone)).length; return noPhone>0 ? <span style={{color:"#92400e"}}> {noPhone} have no usable phone number on file and will be skipped automatically.</span> : null; })()}
               </div>
               <button
@@ -3356,7 +3464,7 @@ ${school.principalName||"The Principal"}`,
                 return (
                   <>
                     <div style={{ fontSize:13,marginBottom:10 }}>
-                      <strong>{r.name}</strong> ({r.className}) — {r.phone || "no phone on file"}
+                      <strong>{r.name}</strong> ({r.subtitle}) — {r.phone || "no phone on file"}
                       {!hasPhone && <Badge text="No usable phone" color="#991b1b" bg="#fee2e2"/>}
                     </div>
                     <pre style={{ background:"#f8fafc",borderRadius:10,padding:14,fontSize:12,lineHeight:1.6,whiteSpace:"pre-wrap",margin:"0 0 16px",color:"#374151",maxHeight:260,overflowY:"auto",fontFamily:"inherit" }}>{r.message}</pre>
@@ -3371,12 +3479,59 @@ ${school.principalName||"The Principal"}`,
                       )}
                       <button onClick={()=>markBulkResult("skipped")} style={{ ...btnS,flex:1 }}>Skip</button>
                     </div>
-                    {bulkIndex===bulkQueue.length-1 && bulkResults[r.studentId] && (
+                    {bulkIndex===bulkQueue.length-1 && bulkResults[r.id] && (
                       <button onClick={finishBulkSend} style={{ ...btnP,width:"100%",marginTop:12,background:"#059669" }}>✅ Done — Finish Bulk Send</button>
                     )}
                   </>
                 );
               })()}
+            </Card>
+          )}
+        </div>
+      )}
+
+      {tab==="history"&&(
+        <div>
+          {!cloudSync?.enabled ? (
+            <Card style={{ padding:22,maxWidth:560 }}>
+              <p style={{ fontSize:13,color:"#64748b" }}>SMS history requires Cloud Sync to be turned on — see Settings → Cloud Sync.</p>
+            </Card>
+          ) : (
+            <Card style={{ padding:22 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+                <h3 style={{ margin:0,fontSize:16 }}>SMS History</h3>
+                <div style={{ display:"flex",gap:6 }}>
+                  {["all","sent","failed"].map(f=>(
+                    <button key={f} onClick={()=>setHistoryFilter(f)} style={{ ...btnSm,background:historyFilter===f?"#1e40af":"#f1f5f9",color:historyFilter===f?"#fff":"#374151" }}>
+                      {f==="all"?"All":f==="sent"?"Delivered":"Failed"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {smsLogLoading ? (
+                <p style={{ fontSize:13,color:"#94a3b8" }}>Loading...</p>
+              ) : smsLog.length===0 ? (
+                <p style={{ fontSize:13,color:"#94a3b8" }}>No SMS sent yet — once you send from Bulk Send, it'll show up here.</p>
+              ) : (
+                <div style={{ maxHeight:520,overflowY:"auto" }}>
+                  {smsLog.filter(r=>historyFilter==="all"||r.status===historyFilter).map(r=>(
+                    <div key={r.id} style={{ padding:"10px 0",borderBottom:"1px solid #f1f5f9" }}>
+                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                        <div style={{ fontSize:13,fontWeight:600 }}>{r.recipient}</div>
+                        <Badge text={r.status==="sent"?"Delivered":"Failed"} color={r.status==="sent"?"#166534":"#991b1b"} bg={r.status==="sent"?"#dcfce7":"#fee2e2"}/>
+                      </div>
+                      <div style={{ fontSize:12,color:"#64748b",margin:"3px 0" }}>{r.message.length>100?r.message.slice(0,100)+"...":r.message}</div>
+                      <div style={{ fontSize:11,color:"#9ca3af" }}>
+                        {new Date(r.createdAt).toLocaleString("en-GB")} · Sent by {r.sentBy||"—"}
+                        {r.error && <span style={{color:"#dc2626"}}> · {r.error}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p style={{ fontSize:11,color:"#94a3b8",marginTop:14 }}>
+                WhatsApp bulk sends aren't tracked here individually (WhatsApp doesn't report delivery back to EduSmart) — those campaign summaries are in Audit Log instead.
+              </p>
             </Card>
           )}
         </div>
@@ -3797,10 +3952,24 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   const [smsStatus,setSmsStatus]=useState({ configured:false });
   const [smsBusy,setSmsBusy]=useState(false);
   const [smsMsg,setSmsMsg]=useState("");
+  const [smsBalanceInput,setSmsBalanceInput]=useState("");
 
   useEffect(()=>{
     if(cloudSync?.enabled && cloudSync.getSmsStatus){ cloudSync.getSmsStatus().then(setSmsStatus); }
   },[cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSetSmsBalance=async()=>{
+    if(smsBalanceInput===""||isNaN(+smsBalanceInput)||+smsBalanceInput<0){ notify("Enter a valid balance","error"); return; }
+    setSmsBusy(true);
+    try{
+      await cloudSync.setSmsBalance(+smsBalanceInput);
+      const status = await cloudSync.getSmsStatus();
+      setSmsStatus(status);
+      setSmsBalanceInput("");
+      notify("Balance updated ✅");
+    } catch(e){ notify(e?.message||"Couldn't update balance","error"); }
+    setSmsBusy(false);
+  };
 
   const handleSaveSmsCredentials=async()=>{
     if(!smsForm.apiKey.trim()||!smsForm.senderId.trim()){ setSmsMsg("Both fields are required."); return; }
@@ -4021,6 +4190,10 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
       cloudSync.writeThroughBulk("fees", d.fees||[]);
       cloudSync.writeThroughBulk("staff", d.users||[]);
       cloudSync.writeThroughBulk("fee_types", d.feeTypes||[]);
+      cloudSync.writeThroughBulk("payroll", d.payroll||[]);
+      cloudSync.writeThroughBulk("books", d.books||[]);
+      cloudSync.writeThroughBulk("borrows", d.borrows||[]);
+      cloudSync.pushTimetablesToCloud(d.timetables||{});
       notify("Backup restored ✅ — syncing to the cloud in the background");
     } else {
       notify("Backup restored ✅");
@@ -4307,6 +4480,26 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
               <div style={{ marginBottom:16 }}>
                 <Badge text={smsStatus.configured?`✅ Connected — Sender ID: ${smsStatus.senderId}`:"Not set up yet"} color={smsStatus.configured?"#166534":"#92400e"} bg={smsStatus.configured?"#dcfce7":"#fef3c7"}/>
               </div>
+
+              {smsStatus.configured && (
+                <div style={{ background:"#f8fafc",border:"1px solid #e5e7eb",borderRadius:8,padding:14,marginBottom:16 }}>
+                  <div style={{ fontSize:12,color:"#64748b",marginBottom:6 }}>Estimated balance</div>
+                  {smsStatus.estimatedBalance!=null ? (
+                    <>
+                      <div style={{ fontSize:22,fontWeight:700,marginBottom:2 }}>{smsStatus.estimatedBalance} credits</div>
+                      <div style={{ fontSize:11,color:"#94a3b8",marginBottom:10 }}>
+                        Estimated — Arkesel doesn't provide a live balance check, so this is calculated from what you last confirmed, minus what's actually been sent since. Verify the real figure in your Arkesel dashboard if it matters for a decision.
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize:12,color:"#92400e",marginBottom:10 }}>Not tracked yet — enter your current balance from your Arkesel dashboard to start tracking.</div>
+                  )}
+                  <div style={{ display:"flex",gap:8 }}>
+                    <input type="number" value={smsBalanceInput} onChange={e=>setSmsBalanceInput(e.target.value)} placeholder="Enter current balance" style={{ ...inp,flex:1 }}/>
+                    <button onClick={handleSetSmsBalance} disabled={smsBusy} style={{ ...btnS,whiteSpace:"nowrap" }}>{smsStatus.estimatedBalance!=null?"Update":"Set"}</button>
+                  </div>
+                </div>
+              )}
 
               <div style={{ background:"#f0f9ff",borderRadius:8,padding:12,fontSize:12,color:"#0369a1",marginBottom:16 }}>
                 Don't have an Arkesel account yet? Sign up free at arkesel.com, then find your API Key under Developer API / SMS API in your dashboard. You'll also need to register a Sender ID (e.g. your school's short name) — this needs approval, so it's worth doing a day or two ahead of when you actually need to send.
