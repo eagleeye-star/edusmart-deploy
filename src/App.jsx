@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "6.0.1";
+const APP_VERSION = "6.0.2";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -3000,6 +3000,24 @@ function Communication({ students,school,curUser,fees,attendance,classes,feeType
   const [selClass,setSelClass]=useState("");
   const [preview,setPreview]=useState("");
   const [letterType,setLetterType]=useState("arrears");
+  // Filled in by the school for templates that describe a specific
+  // event — PTA meetings, exam start dates, disciplinary meetings —
+  // rather than being left as blanks the recipient can never fill in
+  // themselves on a message they received.
+  const [eventDate,setEventDate]=useState("");
+  const [eventTime,setEventTime]=useState("");
+  const [meetingDate,setMeetingDate]=useState("");
+  const [meetingTime,setMeetingTime]=useState("");
+
+  const needsEventDate = templateType==="pta_invite" || templateType==="exam_notice";
+  const needsEventTime = templateType==="pta_invite";
+  const formatDateNice = (iso) => iso ? new Date(iso+"T00:00:00").toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"}) : "";
+  const formatTimeNice = (t) => {
+    if (!t) return "";
+    const [h,m] = t.split(":").map(Number);
+    const period = h>=12?"PM":"AM"; const h12 = h%12===0?12:h%12;
+    return `${h12}:${String(m).padStart(2,"0")}${period}`;
+  };
 
   const activeStudents=students.filter(s=>s.status==="active");
   const classStudents=selClass?activeStudents.filter(s=>s.class===selClass):activeStudents;
@@ -3047,7 +3065,7 @@ ${school.phone}`,
 
     exam_notice: (s) => `Dear ${s?.guardian||"Parent/Guardian"},
 
-End of term examinations for *${s?.name}* (${s?.class}) are scheduled to begin soon.
+End of term examinations for *${s?.name}* (${s?.class}) are scheduled to begin on *${formatDateNice(eventDate)||"[date not yet set]"}*.
 
 Please ensure your child:
 ✅ Reports to school on time
@@ -3065,8 +3083,8 @@ You are cordially invited to the Parent-Teacher Association (PTA) Meeting for ${
 
 This is an important meeting to discuss your child's progress and the school's development plans. Your attendance is highly encouraged.
 
-Date: ____________
-Time: ____________
+Date: ${formatDateNice(eventDate)||"[date not yet set]"}
+Time: ${formatTimeNice(eventTime)||"[time not yet set]"}
 Venue: ${school.name}
 
 We look forward to seeing you.
@@ -3127,7 +3145,7 @@ We wish to bring to your attention a matter regarding the conduct of your ward, 
 
 [Describe incident here]
 
-We request that you visit the school on ____________ at ____________ to discuss this matter with the headmaster.
+We request that you visit the school on ${formatDateNice(meetingDate)||"[date not yet set]"} at ${formatTimeNice(meetingTime)||"[time not yet set]"} to discuss this matter with the headmaster.
 
 Yours faithfully,
 
@@ -3296,6 +3314,15 @@ ${school.principalName||"The Principal"}`,
               <option value="exam_notice">Exam Notice</option>
               <option value="pta_invite">PTA Invitation</option>
             </select></Row>
+            {needsEventDate && (
+              <div style={{ background:"#fef3c7",borderRadius:8,padding:12,marginBottom:12 }}>
+                <div style={{ display:"flex",gap:8 }}>
+                  <Row label={templateType==="pta_invite"?"Meeting Date":"Exam Start Date"}><input type="date" value={eventDate} onChange={e=>setEventDate(e.target.value)} style={inp}/></Row>
+                  {needsEventTime && <Row label="Meeting Time"><input type="time" value={eventTime} onChange={e=>setEventTime(e.target.value)} style={inp}/></Row>}
+                </div>
+                <p style={{ fontSize:11,color:"#92400e",margin:0 }}>Required — without this, the message would go out with no actual date, leaving parents unable to plan around it.</p>
+              </div>
+            )}
             <Row label="For Single Student (optional)"><select value={selStu} onChange={e=>setSelStu(e.target.value)} style={inp}>
               <option value="">All / Broadcast</option>
               {activeStudents.map(s=><option key={s.id} value={s.id}>{s.name} — {s.class}</option>)}
@@ -3304,10 +3331,15 @@ ${school.principalName||"The Principal"}`,
               <option value="">All Classes</option>
               {classes.map(c=><option key={c}>{c}</option>)}
             </select></Row>
-            <div style={{ display:"flex",gap:8,marginTop:8 }}>
-              <button onClick={getPreview} style={{ ...btnP,flex:1 }}>👁️ Preview</button>
-              {!selStu&&<button onClick={()=>setPreview(genAllMessages())} style={{ ...btnP,flex:1,background:"#059669" }}>📋 Generate All</button>}
-            </div>
+            {(() => {
+              const missingEventInfo = needsEventDate && (!eventDate || (needsEventTime && !eventTime));
+              return (
+                <div style={{ display:"flex",gap:8,marginTop:8 }}>
+                  <button onClick={getPreview} disabled={missingEventInfo} style={{ ...btnP,flex:1,opacity:missingEventInfo?0.5:1 }}>👁️ Preview</button>
+                  {!selStu&&<button onClick={()=>setPreview(genAllMessages())} disabled={missingEventInfo} style={{ ...btnP,flex:1,background:"#059669",opacity:missingEventInfo?0.5:1 }}>📋 Generate All</button>}
+                </div>
+              );
+            })()}
           </Card>
           <Card style={{ padding:18 }}>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
@@ -3427,6 +3459,15 @@ ${school.principalName||"The Principal"}`,
                     <option value="pta_invite">PTA Invitation</option>
                     <option value="custom">✏️ Custom Message</option>
                   </select></Row>
+                  {(bulkTemplateType==="pta_invite"||bulkTemplateType==="exam_notice") && (
+                    <div style={{ background:"#fef3c7",borderRadius:8,padding:12,marginBottom:12 }}>
+                      <div style={{ display:"flex",gap:8 }}>
+                        <Row label={bulkTemplateType==="pta_invite"?"Meeting Date":"Exam Start Date"}><input type="date" value={eventDate} onChange={e=>setEventDate(e.target.value)} style={inp}/></Row>
+                        {bulkTemplateType==="pta_invite" && <Row label="Meeting Time"><input type="time" value={eventTime} onChange={e=>setEventTime(e.target.value)} style={inp}/></Row>}
+                      </div>
+                      <p style={{ fontSize:11,color:"#92400e",margin:0 }}>Required — without this, every recipient gets a message with no actual date.</p>
+                    </div>
+                  )}
                   {bulkTemplateType==="custom" && (
                     <Row label="Your Message">
                       <textarea value={bulkCustomMessage} onChange={e=>setBulkCustomMessage(e.target.value)} rows={5} style={{ ...inp,width:"100%",fontFamily:"inherit" }} placeholder="Type your message here..."/>
@@ -3442,6 +3483,8 @@ ${school.principalName||"The Principal"}`,
               <button
                 onClick={()=>{
                   if (bulkTemplateType==="custom" && !bulkCustomMessage.trim()) { notify("Type a message first","error"); return; }
+                  if (bulkTemplateType==="pta_invite" && (!eventDate||!eventTime)) { notify("Set the meeting date and time first","error"); return; }
+                  if (bulkTemplateType==="exam_notice" && !eventDate) { notify("Set the exam start date first","error"); return; }
                   if (bulkChannel==="sms") setSmsConfirming(true); else buildBulkQueue();
                 }}
                 disabled={bulkCandidates.length===0 || (bulkChannel==="sms" && !cloudSync?.enabled)}
@@ -3545,14 +3588,31 @@ ${school.principalName||"The Principal"}`,
               <option value="arrears">Fee Arrears Notice</option>
               <option value="disciplinary">Disciplinary Notice</option>
             </select></Row>
+            {letterType==="disciplinary" && (
+              <div style={{ background:"#fef3c7",borderRadius:8,padding:12,marginBottom:12 }}>
+                <div style={{ display:"flex",gap:8 }}>
+                  <Row label="Meeting Date"><input type="date" value={meetingDate} onChange={e=>setMeetingDate(e.target.value)} style={inp}/></Row>
+                  <Row label="Meeting Time"><input type="time" value={meetingTime} onChange={e=>setMeetingTime(e.target.value)} style={inp}/></Row>
+                </div>
+                <p style={{ fontSize:11,color:"#92400e",margin:0 }}>Required — without this, the letter goes out with no actual date for the parent to show up.</p>
+              </div>
+            )}
             <Row label="Student"><select value={selStu} onChange={e=>setSelStu(e.target.value)} style={inp}>
               <option value="">Select student</option>
               {activeStudents.map(s=><option key={s.id} value={s.id}>{s.name} — {s.class}</option>)}
             </select></Row>
-            <div style={{ display:"flex",gap:8,marginTop:8 }}>
-              <button onClick={()=>setLetterPreview((letterTemplates[letterType]||letterTemplates.arrears)(selStudent||{name:"[Name]",class:"[Class]",guardian:"Parent/Guardian",fees:0,paid:0}))} style={{ ...btnP,flex:1 }}>👁️ Preview Letter</button>
-              {letterPreview&&<button onClick={()=>window.print()} style={{ ...btnP,flex:1,background:"#059669" }}>🖨️ Print</button>}
-            </div>
+            {(() => {
+              const missingMeetingInfo = letterType==="disciplinary" && (!meetingDate||!meetingTime);
+              return (
+                <div style={{ display:"flex",gap:8,marginTop:8 }}>
+                  <button onClick={()=>{
+                    if (missingMeetingInfo) { notify("Set the meeting date and time first","error"); return; }
+                    setLetterPreview((letterTemplates[letterType]||letterTemplates.arrears)(selStudent||{name:"[Name]",class:"[Class]",guardian:"Parent/Guardian",fees:0,paid:0}));
+                  }} disabled={missingMeetingInfo} style={{ ...btnP,flex:1,opacity:missingMeetingInfo?0.5:1 }}>👁️ Preview Letter</button>
+                  {letterPreview&&<button onClick={()=>window.print()} style={{ ...btnP,flex:1,background:"#059669" }}>🖨️ Print</button>}
+                </div>
+              );
+            })()}
           </Card>
           <Card style={{ padding:18 }}>
             <h3 style={{ margin:"0 0 10px",fontSize:15 }}>Letter Preview</h3>
