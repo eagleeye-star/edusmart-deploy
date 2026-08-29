@@ -209,12 +209,18 @@ export function useCloudSync({ appState, appSetters }) {
     );
     try {
       const schoolInfo = await remoteRef.current.fetchSchoolInfo();
-      const { timetablesJson, ...schoolFields } = schoolInfo;
+      const { timetablesJson, classesConfigJson, ...schoolFields } = schoolInfo;
       appSetters.school(prev => ({ ...prev, ...schoolFields }));
-      // timetables lives in its own top-level app state, not nested
-      // inside school — routing it there directly avoids it silently
-      // landing somewhere the Timetable UI never actually reads from.
+      // timetables and classes/subjects live in their own top-level
+      // app state, not nested inside school — routing them there
+      // directly avoids them silently landing somewhere the relevant
+      // UI never actually reads from.
       if (timetablesJson && appSetters.timetables) appSetters.timetables(timetablesJson);
+      if (classesConfigJson && appSetters.classes) {
+        if (classesConfigJson.classes) appSetters.classes(classesConfigJson.classes);
+        if (classesConfigJson.classLevels && appSetters.classLevels) appSetters.classLevels(classesConfigJson.classLevels);
+        if (classesConfigJson.subjects && appSetters.subjects) appSetters.subjects(classesConfigJson.subjects);
+      }
     } catch (e) { /* non-fatal — school name etc. can be filled in later */ }
     // Populate local state directly (not via mergeIntoAppState's
     // client_id-matching logic, since there's no existing local data
@@ -343,6 +349,40 @@ export function useCloudSync({ appState, appSetters }) {
     catch (e) { /* non-fatal — local copy is still correct either way */ }
   }, [enabled]);
 
+  // Classes & Subjects — same gap this same fix already closed for
+  // Timetables and the general School Profile: this had NO sync
+  // mechanism at all until now. Same pattern: push on change, pull on
+  // join (see the app-level join flow).
+  const pushClassesConfigToCloud = useCallback(async (classesConfigObj) => {
+    if (!enabled) return;
+    const link = getDeviceLink(window.localStorage);
+    if (!link) return;
+    try { await remoteRef.current.updateSchoolInfo(link.schoolId, { classesConfigJson: classesConfigObj }); }
+    catch (e) { /* non-fatal — local copy is still correct either way */ }
+  }, [enabled]);
+
+  const fetchClassesConfigFromCloud = useCallback(async () => {
+    if (!enabled) return null;
+    try {
+      const info = await remoteRef.current.fetchSchoolInfo();
+      return info.classesConfigJson || null;
+    } catch (e) { return null; }
+  }, [enabled]);
+
+  // Pushes the general school profile (name, address, logo, term
+  // dates, etc.) whenever it changes locally — this was previously
+  // only ever pushed once, at the moment Cloud Sync was first turned
+  // on, meaning any edit made afterward silently never reached other
+  // devices. Fixed to work the same way Timetables already does:
+  // debounced push on change, from the app-level effect that calls this.
+  const pushSchoolProfileToCloud = useCallback(async (schoolObj) => {
+    if (!enabled) return;
+    const link = getDeviceLink(window.localStorage);
+    if (!link) return;
+    try { await remoteRef.current.updateSchoolInfo(link.schoolId, schoolObj); }
+    catch (e) { /* non-fatal — will retry on the next change */ }
+  }, [enabled]);
+
   const fetchTimetablesFromCloud = useCallback(async () => {
     if (!enabled) return null;
     try {
@@ -351,12 +391,46 @@ export function useCloudSync({ appState, appSetters }) {
     } catch (e) { return null; }
   }, [enabled]);
 
+  const getBackupSettings = useCallback(async () => {
+    if (!enabled) return { frequency: "off", retentionCount: 4, lastBackupAt: null };
+    try { return await remoteRef.current.getBackupSettings(); }
+    catch (e) { return { frequency: "off", retentionCount: 4, lastBackupAt: null }; }
+  }, [enabled]);
+
+  const saveBackupSettings = useCallback(async (settings) => {
+    const link = getDeviceLink(window.localStorage);
+    if (!link) throw new Error("Cloud sync isn't enabled on this device.");
+    await remoteRef.current.saveBackupSettings(link.schoolId, settings);
+  }, []);
+
+  // Called by the scheduler when a backup is actually due — builds
+  // the same JSON shape the manual export already produces, uploads
+  // it, and the adapter prunes anything beyond the retention count.
+  const runAutomaticBackup = useCallback(async (backupJsonString, retentionCount) => {
+    const link = getDeviceLink(window.localStorage);
+    if (!link) throw new Error("Cloud sync isn't enabled on this device.");
+    return remoteRef.current.uploadBackup(link.schoolId, backupJsonString, retentionCount);
+  }, []);
+
+  const listCloudBackups = useCallback(async () => {
+    const link = getDeviceLink(window.localStorage);
+    if (!link) return [];
+    try { return await remoteRef.current.listBackups(link.schoolId); }
+    catch (e) { return []; }
+  }, []);
+
+  const downloadCloudBackup = useCallback(async (path) => {
+    return remoteRef.current.downloadBackup(path);
+  }, []);
+
   return {
     enabled, status, writeThrough, writeThroughBulk, verifyPin,
     enableNewSchool, joinWithConnectCode, linkToExistingSchool,
     pushLicenceToCloud, checkForLicenceUpdate,
     getConnectCode, disable, syncNow,
     saveSmsCredentials, getSmsStatus, sendBulkSms, setSmsBalance, fetchSmsLog,
-    pushTimetablesToCloud, fetchTimetablesFromCloud,
+    pushTimetablesToCloud, fetchTimetablesFromCloud, pushSchoolProfileToCloud,
+    pushClassesConfigToCloud, fetchClassesConfigFromCloud,
+    getBackupSettings, saveBackupSettings, runAutomaticBackup, listCloudBackups, downloadCloudBackup,
   };
 }

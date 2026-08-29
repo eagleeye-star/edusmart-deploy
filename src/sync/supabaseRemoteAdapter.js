@@ -156,7 +156,7 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
         name: data.name, address: data.address, phone: data.phone, email: data.email,
         motto: data.motto, currentTerm: data.current_term, currentYear: data.current_year,
         principalName: data.principal_name, logo: data.logo_url, termStartDate: data.term_start_date,
-        timetablesJson: data.timetables_json,
+        timetablesJson: data.timetables_json, classesConfigJson: data.classes_config_json,
       };
     },
 
@@ -165,12 +165,19 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
     // setup, so a device joining later via Connect Code sees accurate
     // information instead of blank fields.
     async updateSchoolInfo(schoolId, schoolInfo) {
-      const { error } = await supabaseClient.from("schools").update({
+      const patch = {
         address: schoolInfo.address, phone: schoolInfo.phone, email: schoolInfo.email,
         motto: schoolInfo.motto, current_term: schoolInfo.currentTerm, current_year: schoolInfo.currentYear,
         principal_name: schoolInfo.principalName, logo_url: schoolInfo.logo, term_start_date: schoolInfo.termStartDate,
         timetables_json: schoolInfo.timetablesJson,
-      }).eq("id", schoolId);
+      };
+      // Only overwrite classes_config_json when it's actually part of
+      // this call — the general School Profile push (name/address/
+      // etc.) fires on every profile change and must NOT accidentally
+      // wipe classes/subjects with undefined just because this
+      // particular call wasn't about them.
+      if (schoolInfo.classesConfigJson !== undefined) patch.classes_config_json = schoolInfo.classesConfigJson;
+      const { error } = await supabaseClient.from("schools").update(patch).eq("id", schoolId);
       if (error) throw error;
     },
 
@@ -249,6 +256,59 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
         id: r.id, recipient: r.recipient, message: r.message, status: r.status,
         error: r.error, sentBy: r.sent_by, createdAt: r.created_at,
       }));
+    },
+
+    // ─── AUTOMATIC BACKUPS (Storage) ────────────────────────────
+    async getBackupSettings() {
+      const { data, error } = await supabaseClient.from("backup_settings").select("*").maybeSingle();
+      if (error) throw error;
+      return data ? {
+        frequency: data.frequency, retentionCount: data.retention_count, lastBackupAt: data.last_backup_at,
+      } : { frequency: "off", retentionCount: 4, lastBackupAt: null };
+    },
+
+    async saveBackupSettings(schoolId, { frequency, retentionCount }) {
+      const { error } = await supabaseClient.from("backup_settings").upsert({
+        school_id: schoolId, frequency, retention_count: retentionCount,
+      }, { onConflict: "school_id" });
+      if (error) throw error;
+    },
+
+    // Uploads a backup, then prunes anything beyond the school's
+    // chosen retention count — oldest first, so the list never grows
+    // unbounded and quietly eats into Storage's free-tier allowance.
+    async uploadBackup(schoolId, jsonString, retentionCount) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const path = `${schoolId}/backup-${timestamp}.json`;
+      const { error: uploadError } = await supabaseClient.storage
+        .from("school-backups")
+        .upload(path, new Blob([jsonString], { type: "application/json" }));
+      if (uploadError) throw uploadError;
+
+      const { error: settingsError } = await supabaseClient.from("backup_settings")
+        .update({ last_backup_at: new Date().toISOString() }).eq("school_id", schoolId);
+      if (settingsError) { /* non-fatal — the backup itself already succeeded */ }
+
+      const { data: existing, error: listError } = await supabaseClient.storage
+        .from("school-backups").list(schoolId, { sortBy: { column: "name", order: "asc" } });
+      if (!listError && existing && existing.length > retentionCount) {
+        const toDelete = existing.slice(0, existing.length - retentionCount).map(f => `${schoolId}/${f.name}`);
+        if (toDelete.length) await supabaseClient.storage.from("school-backups").remove(toDelete);
+      }
+      return { path };
+    },
+
+    async listBackups(schoolId) {
+      const { data, error } = await supabaseClient.storage
+        .from("school-backups").list(schoolId, { sortBy: { column: "name", order: "desc" } });
+      if (error) throw error;
+      return (data || []).map(f => ({ name: f.name, path: `${schoolId}/${f.name}`, createdAt: f.created_at, size: f.metadata?.size }));
+    },
+
+    async downloadBackup(path) {
+      const { data, error } = await supabaseClient.storage.from("school-backups").download(path);
+      if (error) throw error;
+      return await data.text();
     },
 
     subscribe(table, onRow) {

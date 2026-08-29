@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "6.1.0";
+const APP_VERSION = "6.1.2";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -527,8 +527,18 @@ export default function EduSmart() {
   // table name throughout.
   const cloudSync = useCloudSync({
     appState: { students, attendance, grades, fees, staff: users, school, fee_types: feeTypes, payroll, books, borrows },
-    appSetters: { students: setStudents, attendance: setAttendance, grades: setGrades, fees: setFees, staff: setUsers, school: setSchool, fee_types: setFeeTypes, payroll: setPayroll, books: setBooks, borrows: setBorrows, timetables: setTimetables },
+    appSetters: { students: setStudents, attendance: setAttendance, grades: setGrades, fees: setFees, staff: setUsers, school: setSchool, fee_types: setFeeTypes, payroll: setPayroll, books: setBooks, borrows: setBorrows, timetables: setTimetables, classes: setClasses, classLevels: setClassLevels, subjects: setSubjects },
   });
+
+  // The exact same data shape as a manual export (Settings → Data &
+  // Backup) — used by both that button and the automatic scheduler
+  // below, so there's only ever one definition of "what a backup
+  // actually contains" to keep correct as the app grows.
+  const buildBackupPayload = useCallback(() => JSON.stringify({
+    version: "6.2", exportDate: nowStr(),
+    school, users, students, grades, mockExams, attendance, fees, feeTypes, expenses, payroll, books, borrows,
+    nurseryLogs, milestones, examSchedule, timetables, auditLog, classes, classLevels, subjects, yearArchive,
+  }, null, 2), [school, users, students, grades, mockExams, attendance, fees, feeTypes, expenses, payroll, books, borrows, nurseryLogs, milestones, examSchedule, timetables, auditLog, classes, classLevels, subjects, yearArchive]);
 
   // Save everything back to local storage shortly after any change.
   // Debounced so rapid typing doesn't write to disk on every keystroke.
@@ -600,6 +610,78 @@ export default function EduSmart() {
     }, 1000);
     return () => { if (timetablesPushTimer.current) clearTimeout(timetablesPushTimer.current); };
   }, [timetables, cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // School Profile push — fixes a real gap: previously, profile edits
+  // (name, address, logo, term dates, etc.) only ever reached the
+  // cloud once, at the moment Cloud Sync was first turned on. Any
+  // edit made afterward stayed local-only, so a device joining later
+  // would fetch a stale profile missing everything since. Same
+  // debounced-on-change pattern as Timetables, just for the rest of
+  // the profile.
+  const schoolPushTimer = useRef(null);
+  useEffect(() => {
+    if (!cloudSync?.enabled) return;
+    if (schoolPushTimer.current) clearTimeout(schoolPushTimer.current);
+    schoolPushTimer.current = setTimeout(() => {
+      cloudSync.pushSchoolProfileToCloud(school);
+    }, 1000);
+    return () => { if (schoolPushTimer.current) clearTimeout(schoolPushTimer.current); };
+  }, [school, cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Classes & Subjects push — the second half of this same fix.
+  // Found this proactively while investigating a report that School
+  // Profile syncing "still wasn't working" after the first patch —
+  // turned out to be this: Settings → Classes & Subjects had no sync
+  // mechanism at all, a separate instance of the identical gap.
+  const classesConfigPushTimer = useRef(null);
+  useEffect(() => {
+    if (!cloudSync?.enabled) return;
+    if (classesConfigPushTimer.current) clearTimeout(classesConfigPushTimer.current);
+    classesConfigPushTimer.current = setTimeout(() => {
+      cloudSync.pushClassesConfigToCloud({ classes, classLevels, subjects });
+    }, 1000);
+    return () => { if (classesConfigPushTimer.current) clearTimeout(classesConfigPushTimer.current); };
+  }, [classes, classLevels, subjects, cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Automatic backups — checks once on launch and every few hours
+  // afterward whether one is actually due, based on the school's own
+  // chosen frequency. Deliberately lightweight: a school with backups
+  // off (the default) never triggers any of this.
+  const [backupSettings, setBackupSettingsState] = useState({ frequency: "off", retentionCount: 4, lastBackupAt: null });
+  const [showBackupReminder, setShowBackupReminder] = useState(false);
+
+  const isBackupDue = useCallback((settings) => {
+    if (!settings || settings.frequency === "off") return false;
+    if (!settings.lastBackupAt) return true;
+    const msSince = Date.now() - new Date(settings.lastBackupAt).getTime();
+    const threshold = settings.frequency === "daily" ? 20 * 60 * 60 * 1000 : 6 * 24 * 60 * 60 * 1000; // slightly under a full day/week, so it doesn't drift later and later
+    return msSince > threshold;
+  }, []);
+
+  useEffect(() => {
+    if (!loggedIn) return;
+    const checkAndRunBackup = async () => {
+      if (cloudSync?.enabled) {
+        const settings = await cloudSync.getBackupSettings();
+        setBackupSettingsState(settings);
+        if (isBackupDue(settings)) {
+          try { await cloudSync.runAutomaticBackup(buildBackupPayload(), settings.retentionCount); }
+          catch (e) { /* non-fatal — will simply retry at the next check */ }
+        }
+      } else if (!window.electronBackup) {
+        // Browser, no cloud sync — the honest limitation: nothing can
+        // be saved automatically here, so a reminder is the best real
+        // protection available. Tracked in localStorage since there's
+        // no cloud account to store this preference in.
+        const localSettings = JSON.parse(window.localStorage.getItem("edusmart_local_backup_reminder") || "{}");
+        const frequency = localSettings.frequency || "off";
+        if (isBackupDue({ frequency, lastBackupAt: localSettings.lastShownAt })) setShowBackupReminder(true);
+      }
+    };
+    checkAndRunBackup();
+    const interval = setInterval(checkAndRunBackup, 4 * 60 * 60 * 1000); // every 4 hours — frequent enough to catch a due backup within the day, cheap enough not to matter
+    return () => clearInterval(interval);
+  }, [loggedIn, cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addAudit = useCallback((action, sec) => {
     if (!curUser) return;
@@ -852,7 +934,7 @@ export default function EduSmart() {
     nurseryLogs,setNurseryLogs,milestones,setMilestones,examSchedule,setExamSchedule,timetables,setTimetables,
     auditLog,setAuditLog,curUser,notify,addAudit,absentAlerts,feeAlerts,overdueBooks,noStock,unlockUser,failedLogins,
     setSchool,licInfo,setLicInfo,setLicenced,classes,setClasses,classLevels,setClassLevels,subjects,setSubjects,yearArchive,setYearArchive,
-    cloudSync };
+    cloudSync, buildBackupPayload };
 
   return (
     <div style={{ display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',sans-serif",background:"#f1f5f9" }}>
@@ -4013,9 +4095,24 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   nurseryLogs,setNurseryLogs,milestones,setMilestones,examSchedule,setExamSchedule,
   timetables,setTimetables,auditLog,setAuditLog,
   classes,setClasses,classLevels,setClassLevels,subjects,setSubjects,yearArchive,setYearArchive,
-  cloudSync, setLicInfo, setLicenced }) {
+  cloudSync, setLicInfo, setLicenced, buildBackupPayload }) {
   const [form,setForm]=useState({...school}); const [tab,setTab]=useState("school");
   const [resetId,setResetId]=useState(""); const [newPin,setNewPin]=useState("");
+
+  // Pulls the latest classes/subjects when this tab is opened —
+  // same on-open pattern already proven for Timetable, so a change
+  // made on another device shows up here without needing a full
+  // device rejoin to see it.
+  useEffect(() => {
+    if (tab!=="classes" || !cloudSync?.enabled) return;
+    cloudSync.fetchClassesConfigFromCloud().then(cfg => {
+      if (!cfg) return;
+      if (cfg.classes) setClasses(cfg.classes);
+      if (cfg.classLevels) setClassLevels(cfg.classLevels);
+      if (cfg.subjects) setSubjects(cfg.subjects);
+    });
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [importFile,setImportFile]=useState(null); const [importErr,setImportErr]=useState("");
   const fileInputRef = useRef(null);
   const [newClassName,setNewClassName]=useState(""); const [newClassLevel,setNewClassLevel]=useState("Primary");
@@ -4038,6 +4135,61 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   const [smsBusy,setSmsBusy]=useState(false);
   const [smsMsg,setSmsMsg]=useState("");
   const [smsBalanceInput,setSmsBalanceInput]=useState("");
+  const [autoBackupSettings,setAutoBackupSettings]=useState({ frequency:"off",retentionCount:4,lastBackupAt:null });
+  const [cloudBackupsList,setCloudBackupsList]=useState([]);
+  const [backupListLoading,setBackupListLoading]=useState(false);
+  const [backupBusy,setBackupBusy]=useState(false);
+
+  useEffect(()=>{
+    if(cloudSync?.enabled && cloudSync.getBackupSettings){
+      cloudSync.getBackupSettings().then(setAutoBackupSettings);
+    }
+  },[cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadCloudBackupsList = async () => {
+    if(!cloudSync?.enabled) return;
+    setBackupListLoading(true);
+    const list = await cloudSync.listCloudBackups();
+    setCloudBackupsList(list);
+    setBackupListLoading(false);
+  };
+
+  const handleSaveBackupSettings = async (patch) => {
+    const updated = { ...autoBackupSettings, ...patch };
+    setAutoBackupSettings(updated);
+    setBackupBusy(true);
+    try {
+      await cloudSync.saveBackupSettings({ frequency: updated.frequency, retentionCount: updated.retentionCount });
+      addAudit(`Automatic backups set to ${updated.frequency}`,"Settings");
+      notify("Backup settings saved ✅");
+    } catch(e) { notify(e?.message||"Couldn't save backup settings","error"); }
+    setBackupBusy(false);
+  };
+
+  const handleBackupNow = async () => {
+    setBackupBusy(true);
+    try {
+      await cloudSync.runAutomaticBackup(buildBackupPayload(), autoBackupSettings.retentionCount);
+      const refreshed = await cloudSync.getBackupSettings();
+      setAutoBackupSettings(refreshed);
+      await loadCloudBackupsList();
+      notify("Backup created ✅");
+    } catch(e) { notify(e?.message||"Backup failed","error"); }
+    setBackupBusy(false);
+  };
+
+  const handleRestoreFromCloudBackup = async (path) => {
+    if(!confirm("Restore from this backup? This replaces your current data with what was saved at that point in time.")) return;
+    setBackupBusy(true);
+    try {
+      const content = await cloudSync.downloadCloudBackup(path);
+      const parsed = JSON.parse(content);
+      setImportFile(parsed);
+      notify("Backup loaded — review it below, then confirm restore.");
+    } catch(e) { notify(e?.message||"Couldn't load that backup","error"); }
+    setBackupBusy(false);
+  };
+
 
   useEffect(()=>{
     if(cloudSync?.enabled && cloudSync.getSmsStatus){ cloudSync.getSmsStatus().then(setSmsStatus); }
@@ -4213,10 +4365,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   };
 
   const exportData=()=>{
-    const data={ version:"5.6", exportDate:nowStr(),
-      school,users,students,grades,mockExams,attendance,fees,feeTypes,expenses,payroll,books,borrows,
-      nurseryLogs,milestones,examSchedule,timetables,auditLog,classes,classLevels,subjects,yearArchive };
-    const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+    const blob=new Blob([buildBackupPayload()],{type:"application/json"});
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a"); a.href=url; a.download=`EduSmart_Backup_${todayStr()}.json`; a.click();
     notify("Full data exported ✅"); addAudit("Full data exported","Settings");
@@ -4437,6 +4586,38 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
           <div style={{ background:"#fff7ed",borderRadius:8,padding:12,fontSize:12,color:"#9a3412",marginBottom:24 }}>
             ⚠️ Data is stored in your browser only. Export regularly — clearing browser data or switching devices will lose everything not backed up.
           </div>
+
+          {cloudSync?.enabled && (
+            <div style={{ borderTop:"1px solid #e5e7eb",paddingTop:20,marginBottom:24 }}>
+              <h3 style={{ margin:"0 0 6px",fontSize:16 }}>🔄 Automatic Backups</h3>
+              <p style={{ fontSize:13,color:"#64748b",marginBottom:14 }}>Since Cloud Sync is on, EduSmart can back itself up automatically — no need to remember.</p>
+              <Row label="How Often"><select value={autoBackupSettings.frequency} onChange={e=>handleSaveBackupSettings({frequency:e.target.value})} disabled={backupBusy} style={inp}>
+                <option value="off">Off</option><option value="daily">Daily</option><option value="weekly">Weekly</option>
+              </select></Row>
+              {autoBackupSettings.frequency!=="off" && (
+                <Row label="Keep Last"><select value={autoBackupSettings.retentionCount} onChange={e=>handleSaveBackupSettings({retentionCount:+e.target.value})} disabled={backupBusy} style={inp}>
+                  {[2,4,8,12].map(n=><option key={n} value={n}>{n} backups</option>)}
+                </select></Row>
+              )}
+              {autoBackupSettings.lastBackupAt && (
+                <p style={{ fontSize:12,color:"#64748b",marginBottom:10 }}>Last automatic backup: {new Date(autoBackupSettings.lastBackupAt).toLocaleString("en-GB")}</p>
+              )}
+              <div style={{ display:"flex",gap:8,marginBottom:14 }}>
+                <button onClick={handleBackupNow} disabled={backupBusy} style={{ ...btnS,flex:1 }}>{backupBusy?"Working...":"Back Up Now"}</button>
+                <button onClick={loadCloudBackupsList} disabled={backupListLoading} style={{ ...btnS,flex:1 }}>{backupListLoading?"Loading...":"View Backups"}</button>
+              </div>
+              {cloudBackupsList.length>0 && (
+                <div style={{ maxHeight:200,overflowY:"auto",background:"#f8fafc",borderRadius:8,padding:10 }}>
+                  {cloudBackupsList.map(b=>(
+                    <div key={b.path} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #e5e7eb",fontSize:12 }}>
+                      <span>{new Date(b.createdAt).toLocaleString("en-GB")}</span>
+                      <button onClick={()=>handleRestoreFromCloudBackup(b.path)} disabled={backupBusy} style={{ ...btnSm,fontSize:11 }}>Restore This</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <h3 style={{ margin:"0 0 12px",fontSize:16,borderTop:"1px solid #e5e7eb",paddingTop:20 }}>Restore from Backup</h3>
           <p style={{ fontSize:13,color:"#64748b",marginBottom:12 }}>Upload a previously exported EduSmart JSON file to restore all data. This replaces current data for any section included in the backup.</p>
