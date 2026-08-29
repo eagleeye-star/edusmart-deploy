@@ -1,7 +1,7 @@
 {
   "name": "edusmart-school-manager",
   "productName": "EduSmart School Manager",
-  "version": "5.4.0",
+  "version": "6.1.1",
   "description": "EduSmart School Manager for Ghanaian Basic Schools",
   "author": "Gilbert Oscar Prah",
   "main": "electron/main.js",
@@ -15,16 +15,17 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.0.0",
+    "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.0.1",
     "playwright": "^1.62.0",
-    "jsdom": "^30.0.0",
     "vite": "^6.0.5"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "@supabase/supabase-js": "^2.45.0"
+    "react-dom": "^18.3.1"
   },
   "build": {
     "appId": "com.eagleeye.edusmart",
