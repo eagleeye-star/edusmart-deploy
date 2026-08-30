@@ -22,7 +22,7 @@ import {
 } from "./cloudSyncSetup.js";
 import { generateConnectCode, parseConnectCode } from "./connectCode.js";
 
-const SYNCED_TABLES = ["students", "attendance", "grades", "fees", "staff", "fee_types", "payroll", "books", "borrows"];
+const SYNCED_TABLES = ["students", "attendance", "grades", "fees", "staff", "fee_types", "payroll", "books", "borrows", "mock_exams", "expenses", "exam_schedule", "nursery_logs", "milestones"];
 const FLUSH_INTERVAL_MS = 8000;
 const JOIN_TIMEOUT_MS = 20000;
 
@@ -209,7 +209,7 @@ export function useCloudSync({ appState, appSetters }) {
     );
     try {
       const schoolInfo = await remoteRef.current.fetchSchoolInfo();
-      const { timetablesJson, classesConfigJson, ...schoolFields } = schoolInfo;
+      const { timetablesJson, classesConfigJson, yearArchiveJson, ...schoolFields } = schoolInfo;
       appSetters.school(prev => ({ ...prev, ...schoolFields }));
       // timetables and classes/subjects live in their own top-level
       // app state, not nested inside school — routing them there
@@ -221,6 +221,7 @@ export function useCloudSync({ appState, appSetters }) {
         if (classesConfigJson.classLevels && appSetters.classLevels) appSetters.classLevels(classesConfigJson.classLevels);
         if (classesConfigJson.subjects && appSetters.subjects) appSetters.subjects(classesConfigJson.subjects);
       }
+      if (yearArchiveJson && appSetters.yearArchive) appSetters.yearArchive(yearArchiveJson);
     } catch (e) { /* non-fatal — school name etc. can be filled in later */ }
     // Populate local state directly (not via mergeIntoAppState's
     // client_id-matching logic, since there's no existing local data
@@ -234,6 +235,11 @@ export function useCloudSync({ appState, appSetters }) {
     if (pulled.payroll?.length) appSetters.payroll(pulled.payroll.map(s => ({ ...s, id: s.client_id })));
     if (pulled.books?.length) appSetters.books(pulled.books.map(s => ({ ...s, id: s.client_id })));
     if (pulled.borrows?.length) appSetters.borrows(pulled.borrows.map(s => ({ ...s, id: s.client_id })));
+    if (pulled.mock_exams?.length) appSetters.mock_exams(pulled.mock_exams.map(s => ({ ...s, id: s.client_id })));
+    if (pulled.expenses?.length) appSetters.expenses(pulled.expenses.map(s => ({ ...s, id: s.client_id })));
+    if (pulled.exam_schedule?.length) appSetters.exam_schedule(pulled.exam_schedule.map(s => ({ ...s, id: s.client_id })));
+    if (pulled.nursery_logs?.length) appSetters.nursery_logs(pulled.nursery_logs.map(s => ({ ...s, id: s.client_id })));
+    if (pulled.milestones?.length) appSetters.milestones(pulled.milestones.map(s => ({ ...s, id: s.client_id })));
     skipNextInitialPull.current = true;
     setEnabled(true);
     return pulled;
@@ -301,6 +307,27 @@ export function useCloudSync({ appState, appSetters }) {
     setStatus(s => ({ ...s, phase: "connecting" }));
     const reachable = await engineRef.current.isReachable();
     const result = reachable ? await engineRef.current.flush() : { pushed: 0, remaining: engineRef.current.pendingCount(), offline: true };
+    // "Sync Now" previously only flushed the per-record queue
+    // (students/attendance/grades/etc.) — school profile, classes,
+    // and timetables live outside that queue entirely (see the JSON-
+    // blob sync design), so a stale copy of any of those would never
+    // get refreshed by this button even though it looked like a full
+    // sync. Pulling them here makes this a genuine "refresh
+    // everything" action, matching what pressing it actually implies.
+    if (reachable) {
+      try {
+        const schoolInfo = await remoteRef.current.fetchSchoolInfo();
+        const { timetablesJson, classesConfigJson, yearArchiveJson, ...schoolFields } = schoolInfo;
+        if (appSetters.school) appSetters.school(prev => ({ ...prev, ...schoolFields }));
+        if (timetablesJson && appSetters.timetables) appSetters.timetables(timetablesJson);
+        if (classesConfigJson) {
+          if (classesConfigJson.classes && appSetters.classes) appSetters.classes(classesConfigJson.classes);
+          if (classesConfigJson.classLevels && appSetters.classLevels) appSetters.classLevels(classesConfigJson.classLevels);
+          if (classesConfigJson.subjects && appSetters.subjects) appSetters.subjects(classesConfigJson.subjects);
+        }
+        if (yearArchiveJson && appSetters.yearArchive) appSetters.yearArchive(yearArchiveJson);
+      } catch (e) { /* non-fatal — the per-record sync above already ran either way */ }
+    }
     setStatus({
       phase: reachable ? "online" : "offline",
       pending: engineRef.current.pendingCount(),
@@ -369,6 +396,26 @@ export function useCloudSync({ appState, appSetters }) {
     } catch (e) { return null; }
   }, [enabled]);
 
+  // Year Archive — written once per year by Promotion, read rarely
+  // (checking a past year's summary). Same JSON-blob pattern as
+  // Timetables and Classes & Subjects: push on change, pull on join
+  // or on-demand from wherever the archive is viewed.
+  const pushYearArchiveToCloud = useCallback(async (yearArchiveObj) => {
+    if (!enabled) return;
+    const link = getDeviceLink(window.localStorage);
+    if (!link) return;
+    try { await remoteRef.current.updateSchoolInfo(link.schoolId, { yearArchiveJson: yearArchiveObj }); }
+    catch (e) { /* non-fatal — local copy is still correct either way */ }
+  }, [enabled]);
+
+  const fetchYearArchiveFromCloud = useCallback(async () => {
+    if (!enabled) return null;
+    try {
+      const info = await remoteRef.current.fetchSchoolInfo();
+      return info.yearArchiveJson || null;
+    } catch (e) { return null; }
+  }, [enabled]);
+
   // Pushes the general school profile (name, address, logo, term
   // dates, etc.) whenever it changes locally — this was previously
   // only ever pushed once, at the moment Cloud Sync was first turned
@@ -431,6 +478,7 @@ export function useCloudSync({ appState, appSetters }) {
     saveSmsCredentials, getSmsStatus, sendBulkSms, setSmsBalance, fetchSmsLog,
     pushTimetablesToCloud, fetchTimetablesFromCloud, pushSchoolProfileToCloud,
     pushClassesConfigToCloud, fetchClassesConfigFromCloud,
+    pushYearArchiveToCloud, fetchYearArchiveFromCloud,
     getBackupSettings, saveBackupSettings, runAutomaticBackup, listCloudBackups, downloadCloudBackup,
   };
 }

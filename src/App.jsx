@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "6.1.3";
+const APP_VERSION = "6.2.0";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -526,8 +526,8 @@ export default function EduSmart() {
   // here so useCloudSync's internals can stay consistently keyed by
   // table name throughout.
   const cloudSync = useCloudSync({
-    appState: { students, attendance, grades, fees, staff: users, school, fee_types: feeTypes, payroll, books, borrows },
-    appSetters: { students: setStudents, attendance: setAttendance, grades: setGrades, fees: setFees, staff: setUsers, school: setSchool, fee_types: setFeeTypes, payroll: setPayroll, books: setBooks, borrows: setBorrows, timetables: setTimetables, classes: setClasses, classLevels: setClassLevels, subjects: setSubjects },
+    appState: { students, attendance, grades, fees, staff: users, school, fee_types: feeTypes, payroll, books, borrows, mock_exams: mockExams, expenses, exam_schedule: examSchedule, nursery_logs: nurseryLogs, milestones },
+    appSetters: { students: setStudents, attendance: setAttendance, grades: setGrades, fees: setFees, staff: setUsers, school: setSchool, fee_types: setFeeTypes, payroll: setPayroll, books: setBooks, borrows: setBorrows, timetables: setTimetables, classes: setClasses, classLevels: setClassLevels, subjects: setSubjects, mock_exams: setMockExams, expenses: setExpenses, exam_schedule: setExamSchedule, nursery_logs: setNurseryLogs, milestones: setMilestones, yearArchive: setYearArchive },
   });
 
   // The exact same data shape as a manual export (Settings → Data &
@@ -642,6 +642,23 @@ export default function EduSmart() {
     }, 1000);
     return () => { if (classesConfigPushTimer.current) clearTimeout(classesConfigPushTimer.current); };
   }, [classes, classLevels, subjects, cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Year Archive push — from the deep bug hunt: Promotion writes a
+  // full year-end snapshot here, and it had zero sync coverage.
+  // Debounced push as a safety net for any change; Promotion ALSO
+  // pushes explicitly right after writing (see Promotion component),
+  // the same lesson learned from the confirmRestore gap — a
+  // significant one-time bulk event shouldn't rely solely on a
+  // passive debounce to reach the cloud.
+  const yearArchivePushTimer = useRef(null);
+  useEffect(() => {
+    if (!cloudSync?.enabled) return;
+    if (yearArchivePushTimer.current) clearTimeout(yearArchivePushTimer.current);
+    yearArchivePushTimer.current = setTimeout(() => {
+      cloudSync.pushYearArchiveToCloud(yearArchive);
+    }, 1000);
+    return () => { if (yearArchivePushTimer.current) clearTimeout(yearArchivePushTimer.current); };
+  }, [yearArchive, cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Automatic backups — checks once on launch and every few hours
   // afterward whether one is actually due, based on the school's own
@@ -1519,7 +1536,7 @@ function Students({ students,setStudents,notify,addAudit,curUser,classes,classLe
             </td>
             <td style={{ padding:"8px 12px",display:"flex",gap:4 }}>
               <button onClick={()=>{setEditId(s.id);setForm({name:s.name,class:s.class,dob:s.dob||"",gender:s.gender,guardian:s.guardian,phone:s.phone,fees:s.fees,paid:s.paid,status:s.status,photo:s.photo||"",feeExemptions:s.feeExemptions||[]});setShowForm(true);}} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8" }}>Edit</button>
-              {s.status==="active"&&<button onClick={()=>{if(confirm(`Mark ${s.name} as dropout?`)){setStudents(p=>p.map(x=>x.id===s.id?{...x,status:"dropout"}:x));addAudit(`Dropout: ${s.name}`,"Students");notify("Moved to archive");}}} style={{ ...btnSm,background:"#fee2e2",color:"#991b1b" }}>Dropout</button>}
+              {s.status==="active"&&<button onClick={()=>{if(confirm(`Mark ${s.name} as dropout?`)){const updated={...s,status:"dropout"};setStudents(p=>p.map(x=>x.id===s.id?updated:x));cloudSync?.writeThrough("students",updated);addAudit(`Dropout: ${s.name}`,"Students");notify("Moved to archive");}}} style={{ ...btnSm,background:"#fee2e2",color:"#991b1b" }}>Dropout</button>}
             </td>
           </tr>
         ))} emptyMsg="No students found."/>
@@ -1529,7 +1546,7 @@ function Students({ students,setStudents,notify,addAudit,curUser,classes,classLe
 }
 
 // ─── NURSERY / KG ────────────────────────────────────────────
-function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,curUser,notify,addAudit,classLevels,levelFilter,pageTitle,pageIcon,school }) {
+function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,curUser,notify,addAudit,classLevels,levelFilter,pageTitle,pageIcon,school,cloudSync }) {
   const [tab,setTab]=useState("daily");
   const [selStu,setSelStu]=useState("");
   const [selDate,setSelDate]=useState(todayStr());
@@ -1551,16 +1568,20 @@ function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,
 
   const saveLog = () => {
     const existing = nurseryLogs.find(l=>l.studentId===selStu&&l.date===selDate);
-    if(existing){ setNurseryLogs(p=>p.map(l=>l.id===existing.id?{...l,...logForm,enteredBy:curUser.code}:l)); }
-    else { setNurseryLogs(p=>[...p,{id:uid("NRS"),studentId:selStu,date:selDate,...logForm,enteredBy:curUser.code}]); }
+    let updated;
+    if(existing){ updated={...existing,...logForm,enteredBy:curUser.code}; setNurseryLogs(p=>p.map(l=>l.id===existing.id?updated:l)); }
+    else { updated={id:uid("NRS"),studentId:selStu,date:selDate,...logForm,enteredBy:curUser.code}; setNurseryLogs(p=>[...p,updated]); }
+    cloudSync?.writeThrough("nursery_logs", updated);
     addAudit(`Daily log: ${selStudent?.name} ${selDate}`,"Nursery"); notify("Log saved"); setShowLog(false); setLogForm(blank);
   };
 
   const saveMilestone = () => {
     if(!msForm.milestone){ notify("Select milestone","error"); return; }
     const existing = milestones.find(m=>m.studentId===selStu&&m.milestone===msForm.milestone&&m.term===selTerm);
-    if(existing){ setMilestones(p=>p.map(m=>m.id===existing.id?{...m,rating:msForm.rating,enteredBy:curUser.code,date:todayStr()}:m)); }
-    else { setMilestones(p=>[...p,{id:uid("MLS"),studentId:selStu,term:selTerm,year:"2024/2025",...msForm,enteredBy:curUser.code,date:todayStr()}]); }
+    let updated;
+    if(existing){ updated={...existing,rating:msForm.rating,enteredBy:curUser.code,date:todayStr()}; setMilestones(p=>p.map(m=>m.id===existing.id?updated:m)); }
+    else { updated={id:uid("MLS"),studentId:selStu,term:selTerm,year:"2024/2025",...msForm,enteredBy:curUser.code,date:todayStr()}; setMilestones(p=>[...p,updated]); }
+    cloudSync?.writeThrough("milestones", updated);
     addAudit(`Milestone: ${selStudent?.name}`,"Nursery"); notify("Milestone saved"); setShowMilestone(false);
   };
 
@@ -1903,7 +1924,7 @@ function Grades({ grades,setGrades,students,curUser,notify,addAudit,classes,subj
 }
 
 // ─── EXAMS ───────────────────────────────────────────────────
-function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,curUser,notify,addAudit,classes,subjects }) {
+function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,curUser,notify,addAudit,classes,subjects,cloudSync }) {
   const [tab,setTab]=useState("schedule");
   const [showSched,setShowSched]=useState(false); const [showMock,setShowMock]=useState(false);
   const schedBlank={ class:"JHS 3",subject:getExamSubjects(subjects)[0],date:"",startTime:"08:00",endTime:"10:00",venue:"Main Hall" };
@@ -1917,13 +1938,17 @@ function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,cu
 
   const saveSched=()=>{
     if(!sf.date||!sf.subject){ notify("Date and subject required","error"); return; }
-    setExamSchedule(p=>[...p,{id:uid("EXM"),...sf,createdBy:curUser.code}]);
+    const newSched = {id:uid("EXM"),...sf,createdBy:curUser.code};
+    setExamSchedule(p=>[...p,newSched]);
+    cloudSync?.writeThrough("exam_schedule", newSched);
     addAudit(`Exam scheduled: ${sf.subject} ${sf.class}`,"Exams"); notify("Exam added"); setShowSched(false); setSf(schedBlank);
   };
 
   const saveMock=()=>{
     if(!mf.studentId||mf.score===""){ notify("Student and score required","error"); return; }
-    setMockExams(p=>[...p,{id:uid("MCK"),...mf,score:+mf.score,enteredBy:curUser.code,date:todayStr()}]);
+    const newMock = {id:uid("MCK"),...mf,score:+mf.score,enteredBy:curUser.code,date:todayStr()};
+    setMockExams(p=>[...p,newMock]);
+    cloudSync?.writeThrough("mock_exams", newMock);
     addAudit(`Mock result: ${mf.subject}`,"Exams"); notify("Mock result saved"); setShowMock(false); setMf(mockBlank);
   };
 
@@ -2046,7 +2071,7 @@ function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,cu
 }
 
 // ─── PROMOTION ───────────────────────────────────────────────
-function Promotion({ students,setStudents,grades,mockExams,attendance,fees,payroll,examSchedule,school,setSchool,curUser,notify,addAudit,yearArchive,setYearArchive }) {
+function Promotion({ students,setStudents,grades,mockExams,attendance,fees,payroll,examSchedule,school,setSchool,curUser,notify,addAudit,yearArchive,setYearArchive,cloudSync }) {
   const [passMark,setPassMark]=useState(50);
   const [evalYear,setEvalYear]=useState(school.currentYear);
   const [preview,setPreview]=useState(null); // array of { student, avg, hasData, defaultResult, override }
@@ -2115,22 +2140,28 @@ function Promotion({ students,setStudents,grades,mockExams,attendance,fees,payro
       };
     }).filter(t=>t.gradeCount>0 || t.feesCollected>0);
 
-    setYearArchive(prev=>({
-      ...prev,
-      [closingYear]: {
-        closedDate: nowStr(),
-        closedBy: curUser?.code,
-        studentsSnapshot: students.map(s=>({ id:s.id,name:s.name,class:s.class,status:s.status })),
-        termBreakdown,
-        totalStudents: activeStudents.length,
-        totalFeesCollected: yearFees.reduce((a,f)=>a+f.paid,0),
-        totalPayroll: yearPayroll.reduce((a,p)=>a+(p.netPay||0),0),
-        promotionSummary: counts,
-      }
-    }));
+    const yearSnapshot = {
+      closedDate: nowStr(),
+      closedBy: curUser?.code,
+      studentsSnapshot: students.map(s=>({ id:s.id,name:s.name,class:s.class,status:s.status })),
+      termBreakdown,
+      totalStudents: activeStudents.length,
+      totalFeesCollected: yearFees.reduce((a,f)=>a+f.paid,0),
+      totalPayroll: yearPayroll.reduce((a,p)=>a+(p.netPay||0),0),
+      promotionSummary: counts,
+    };
+    let newYearArchive;
+    setYearArchive(prev=>{ newYearArchive = { ...prev, [closingYear]: yearSnapshot }; return newYearArchive; });
+    // Year-end promotion is a significant, once-a-year event — same
+    // reasoning as the confirmRestore fix: an explicit push here,
+    // rather than relying solely on the passive debounced effect,
+    // removes any doubt this specific record actually reaches the
+    // cloud right when it matters most.
+    if (cloudSync?.enabled) cloudSync.pushYearArchiveToCloud(newYearArchive);
 
     let byClass = {}; // recompute nextClass for Promote rows honoring KG2 split order at execution time
     const classCounters = {};
+    let updatedStudentsList = [];
     setStudents(prevStudents=>{
       const map = new Map(prevStudents.map(s=>[s.id,{...s}]));
       preview.forEach(r=>{
@@ -2144,8 +2175,19 @@ function Promotion({ students,setStudents,grades,mockExams,attendance,fees,payro
         }
         // "Repeat" and "Review" leave the student's class unchanged
       });
-      return Array.from(map.values());
+      updatedStudentsList = Array.from(map.values());
+      return updatedStudentsList;
     });
+    // This changes potentially hundreds of students' class/status at
+    // once, bypassing every normal per-student save point — without
+    // an explicit bulk push here, none of it would ever reach the
+    // cloud, exactly like the restore-flow gap found and fixed
+    // earlier. Only the students actually touched by this run are
+    // pushed, not the whole roster.
+    if (cloudSync?.enabled) {
+      const touchedIds = new Set(preview.map(r=>r.student.id));
+      cloudSync.writeThroughBulk("students", updatedStudentsList.filter(s=>touchedIds.has(s.id)));
+    }
     const newYear = nextAcademicYear(school.currentYear);
     setSchool(prev=>({ ...prev, currentYear:newYear, currentTerm:"Term 1" }));
     addAudit(`Year-end promotion run: ${counts.Promote} promoted, ${counts.Graduate} graduated, ${counts.Repeat} repeated, ${counts.Review} flagged for review. New year: ${newYear}. Year ${closingYear} archived to History.`,"Promotion");
@@ -2509,7 +2551,9 @@ function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school
 
   const saveExp=()=>{
     if(!expForm.description||!expForm.amount){ notify("Description and amount required","error"); return; }
-    setExpenses(p=>[...p,{id:uid("EXP"),...expForm,amount:+expForm.amount,enteredBy:curUser.code}]);
+    const newExp = {id:uid("EXP"),...expForm,amount:+expForm.amount,enteredBy:curUser.code};
+    setExpenses(p=>[...p,newExp]);
+    cloudSync?.writeThrough("expenses", newExp);
     addAudit(`Expense: ${expForm.description} ${formatGHS(+expForm.amount)}`,"Finance"); notify("Expense recorded");
     setShowExp(false); setExpForm({description:"",amount:"",category:"Supplies",date:todayStr()});
   };
@@ -4014,7 +4058,7 @@ function IDCard({ person,type,school,roleColors }) {
 }
 
 // ─── ARCHIVE ─────────────────────────────────────────────────
-function Archive({ students,setStudents,users,setUsers,notify,addAudit }) {
+function Archive({ students,setStudents,users,setUsers,notify,addAudit,cloudSync }) {
   const [tab,setTab]=useState("dropouts");
   const dropped=students.filter(s=>s.status==="dropout");
   const graduated=students.filter(s=>s.status==="graduated");
@@ -4023,8 +4067,18 @@ function Archive({ students,setStudents,users,setUsers,notify,addAudit }) {
   const graduatedSort = useSort(graduated, "name");
   const inactiveSort = useSort(inactive, "name");
 
-  const restore=id=>{ setStudents(p=>p.map(s=>s.id===id?{...s,status:"active"}:s)); addAudit(`Restored: ${id}`,"Archive"); notify("Restored to active"); };
-  const graduate=id=>{ setStudents(p=>p.map(s=>s.id===id?{...s,status:"graduated"}:s)); addAudit(`Graduated: ${id}`,"Archive"); notify("Marked as graduated"); };
+  const restore=id=>{
+    const updated = {...students.find(s=>s.id===id), status:"active"};
+    setStudents(p=>p.map(s=>s.id===id?updated:s));
+    cloudSync?.writeThrough("students", updated);
+    addAudit(`Restored: ${id}`,"Archive"); notify("Restored to active");
+  };
+  const graduate=id=>{
+    const updated = {...students.find(s=>s.id===id), status:"graduated"};
+    setStudents(p=>p.map(s=>s.id===id?updated:s));
+    cloudSync?.writeThrough("students", updated);
+    addAudit(`Graduated: ${id}`,"Archive"); notify("Marked as graduated");
+  };
 
   const cols=["ID","Name","Class","Guardian","Phone","Status","Actions"];
   const colKeys=[null,"name","class","guardian","phone","status",null];
@@ -4427,7 +4481,21 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
       cloudSync.writeThroughBulk("payroll", d.payroll||[]);
       cloudSync.writeThroughBulk("books", d.books||[]);
       cloudSync.writeThroughBulk("borrows", d.borrows||[]);
+      cloudSync.writeThroughBulk("mock_exams", d.mockExams||[]);
+      cloudSync.writeThroughBulk("expenses", d.expenses||[]);
+      cloudSync.writeThroughBulk("exam_schedule", d.examSchedule||[]);
+      cloudSync.writeThroughBulk("nursery_logs", d.nurseryLogs||[]);
+      cloudSync.writeThroughBulk("milestones", d.milestones||[]);
       cloudSync.pushTimetablesToCloud(d.timetables||{});
+      // These were previously left to the passive debounced effect
+      // (which watches the relevant state and pushes ~1s after a
+      // change) — during a bulk restore that fires a dozen state
+      // updates in the same tick, relying on that alone wasn't
+      // reliable enough. Explicit push here, same as Timetables
+      // already correctly does, removes any doubt.
+      if (d.school) cloudSync.pushSchoolProfileToCloud(d.school);
+      cloudSync.pushClassesConfigToCloud({ classes: d.classes||classes, classLevels: d.classLevels||classLevels, subjects: d.subjects||subjects });
+      if (d.yearArchive) cloudSync.pushYearArchiveToCloud(d.yearArchive);
       notify("Backup restored ✅ — syncing to the cloud in the background");
     } else {
       notify("Backup restored ✅");

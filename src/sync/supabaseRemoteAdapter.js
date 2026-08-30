@@ -49,6 +49,12 @@ const FIELD_MAPS = {
   books:      {},
   borrows:    { bookId: "book_id", borrowerId: "borrower_id", borrowerType: "borrower_type",
                 borrowDate: "borrow_date", dueDate: "due_date", returnDate: "return_date", enteredBy: "entered_by" },
+  mock_exams:    { studentId: "student_id", examType: "exam_type", enteredBy: "entered_by" },
+  expenses:      { enteredBy: "entered_by" },
+  exam_schedule: { startTime: "start_time", endTime: "end_time", createdBy: "created_by" },
+  nursery_logs:  { studentId: "student_id", napStart: "nap_start", napEnd: "nap_end",
+                   feedingTimes: "feeding_times", feedingNotes: "feeding_notes", enteredBy: "entered_by" },
+  milestones:    { studentId: "student_id", enteredBy: "entered_by" },
 };
 
 function toDbFields(table, obj) {
@@ -157,6 +163,7 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
         motto: data.motto, currentTerm: data.current_term, currentYear: data.current_year,
         principalName: data.principal_name, logo: data.logo_url, termStartDate: data.term_start_date,
         timetablesJson: data.timetables_json, classesConfigJson: data.classes_config_json,
+        yearArchiveJson: data.year_archive_json,
       };
     },
 
@@ -177,6 +184,7 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
       // wipe classes/subjects with undefined just because this
       // particular call wasn't about them.
       if (schoolInfo.classesConfigJson !== undefined) patch.classes_config_json = schoolInfo.classesConfigJson;
+      if (schoolInfo.yearArchiveJson !== undefined) patch.year_archive_json = schoolInfo.yearArchiveJson;
       const { error } = await supabaseClient.from("schools").update(patch).eq("id", schoolId);
       if (error) throw error;
     },
