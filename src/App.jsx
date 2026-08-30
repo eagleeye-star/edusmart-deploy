@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "6.1.2";
+const APP_VERSION = "6.1.3";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -4829,7 +4829,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
           <div style={{ textAlign:"center",marginBottom:20 }}>
             <div style={{ fontSize:40 }}>🏫</div>
             <h2 style={{ margin:"8px 0 2px",fontSize:20 }}>EduSmart School Manager</h2>
-            <p style={{ margin:0,color:"#64748b",fontSize:13 }}>Version 6.0.2</p>
+            <p style={{ margin:0,color:"#64748b",fontSize:13 }}>Version {APP_VERSION}</p>
           </div>
           <p style={{ fontSize:13,lineHeight:1.7,color:"#374151" }}>
             EduSmart is an all-in-one school management system built for Ghanaian private basic schools —
@@ -4853,7 +4853,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
       {tab==="terms"&&(
         <Card style={{ padding:24,maxWidth:700 }}>
           <h3 style={{ margin:"0 0 4px",fontSize:16 }}>Terms of Use</h3>
-          <p style={{ fontSize:11,color:"#94a3b8",marginBottom:18 }}>Last updated: August 2026 · EduSmart School Manager, v6.0.2</p>
+          <p style={{ fontSize:11,color:"#94a3b8",marginBottom:18 }}>Last updated: August 2026 · EduSmart School Manager, v{APP_VERSION}</p>
           <div style={{ fontSize:13,lineHeight:1.8,color:"#374151" }}>
 
             <h4 style={{ fontSize:13,margin:"16px 0 6px" }}>1. Acceptance</h4>
