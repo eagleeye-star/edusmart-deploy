@@ -1,0 +1,9 @@
+[
+  { "week": 1, "feedType": "Broiler Starter", "feedIntakePerBirdG": 20, "estWeightG": 185 },
+  { "week": 2, "feedType": null, "feedIntakePerBirdG": 48, "estWeightG": 465 },
+  { "week": 3, "feedType": "Broiler Grower", "feedIntakePerBirdG": 80, "estWeightG": 940 },
+  { "week": 4, "feedType": null, "feedIntakePerBirdG": 120, "estWeightG": 1560 },
+  { "week": 5, "feedType": "Broiler Finisher", "feedIntakePerBirdG": 155, "estWeightG": 2270 },
+  { "week": 6, "feedType": null, "feedIntakePerBirdG": 185, "estWeightG": 3020 },
+  { "week": 7, "feedType": null, "feedIntakePerBirdG": 200, "estWeightG": 3790 }
+]

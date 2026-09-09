@@ -1,0 +1,77 @@
+@import url('https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #1F1B16;
+  --bg-alt: #241F18;
+  --surface: #2A241C;
+  --surface-raised: #322A20;
+  --border: #423827;
+  --gold: #D4A537;
+  --gold-dim: #8C7431;
+  --green: #7A9A66;
+  --rust: #C15F41;
+  --text: #F1EAE0;
+  --text-dim: #B9AD9A;
+  --text-faint: #83786A;
+
+  --font-display: 'Zilla Slab', Georgia, serif;
+  --font-body: 'Inter', -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--bg);
+  background-image:
+    radial-gradient(circle at 15% 0%, rgba(212,165,55,0.05), transparent 45%),
+    radial-gradient(circle at 90% 30%, rgba(122,154,102,0.04), transparent 40%);
+  color: var(--text);
+  font-family: var(--font-body);
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--gold);
+  color: #1F1B16;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+input, select, textarea {
+  font-family: inherit;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 9px 11px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color .15s ease;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--gold-dim);
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+
+a { color: var(--gold); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

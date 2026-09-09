@@ -1,0 +1,380 @@
+[
+  {
+    "date": "2026-05-01",
+    "feedType": "Broiler starter",
+    "purchased": 50.0,
+    "used": 2.0,
+    "balance": 48.0,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-02",
+    "feedType": null,
+    "purchased": null,
+    "used": 2.158,
+    "balance": 45.842,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-03",
+    "feedType": null,
+    "purchased": null,
+    "used": 3.87,
+    "balance": 41.972,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-04",
+    "feedType": null,
+    "purchased": null,
+    "used": 4.417,
+    "balance": 37.555,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-05",
+    "feedType": null,
+    "purchased": null,
+    "used": 4.448,
+    "balance": 33.107,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-06",
+    "feedType": null,
+    "purchased": null,
+    "used": 6.047,
+    "balance": 27.06,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-07",
+    "feedType": null,
+    "purchased": null,
+    "used": 6.602,
+    "balance": 20.458,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-08",
+    "feedType": "Broiler starter",
+    "purchased": 50.0,
+    "used": 8.829,
+    "balance": 32.086999999999996,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-09",
+    "feedType": null,
+    "purchased": null,
+    "used": 4.774,
+    "balance": 27.312999999999995,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-10",
+    "feedType": null,
+    "purchased": null,
+    "used": 7.633,
+    "balance": 19.679999999999996,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-11",
+    "feedType": null,
+    "purchased": null,
+    "used": 9.778,
+    "balance": 9.901999999999996,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-12",
+    "feedType": null,
+    "purchased": null,
+    "used": 5.03,
+    "balance": 4.8719999999999954,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-13",
+    "feedType": "Chick mash",
+    "purchased": 100.0,
+    "used": 7.459,
+    "balance": 97.413,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-14",
+    "feedType": null,
+    "purchased": null,
+    "used": null,
+    "balance": 97.413,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-15",
+    "feedType": "Chick mash",
+    "purchased": null,
+    "used": 9.143,
+    "balance": 88.27,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-16",
+    "feedType": null,
+    "purchased": null,
+    "used": 11.271,
+    "balance": 76.999,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-17",
+    "feedType": null,
+    "purchased": null,
+    "used": 8.815,
+    "balance": 68.184,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-18",
+    "feedType": null,
+    "purchased": null,
+    "used": 14.702,
+    "balance": 53.482,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-19",
+    "feedType": null,
+    "purchased": null,
+    "used": 9.073,
+    "balance": 44.409,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-20",
+    "feedType": null,
+    "purchased": null,
+    "used": 12.25,
+    "balance": 32.159,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-21",
+    "feedType": null,
+    "purchased": 100.0,
+    "used": 12.425,
+    "balance": 119.734,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-22",
+    "feedType": "Chick mash",
+    "purchased": null,
+    "used": 14.956,
+    "balance": 104.77799999999999,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-23",
+    "feedType": null,
+    "purchased": null,
+    "used": 12.771,
+    "balance": 92.00699999999999,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-24",
+    "feedType": null,
+    "purchased": null,
+    "used": 13.433,
+    "balance": 78.57399999999998,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-25",
+    "feedType": null,
+    "purchased": null,
+    "used": 14.99,
+    "balance": 63.58399999999998,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-26",
+    "feedType": null,
+    "purchased": null,
+    "used": 14.939,
+    "balance": 48.64499999999998,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-27",
+    "feedType": null,
+    "purchased": null,
+    "used": 14.939,
+    "balance": 33.70599999999998,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-28",
+    "feedType": null,
+    "purchased": null,
+    "used": 14.939,
+    "balance": 18.76699999999998,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-29",
+    "feedType": "Chick mash",
+    "purchased": 100.0,
+    "used": 15.285,
+    "balance": 103.48199999999999,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-30",
+    "feedType": null,
+    "purchased": null,
+    "used": 17.039,
+    "balance": 86.44299999999998,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-05-31",
+    "feedType": null,
+    "purchased": null,
+    "used": 17.326,
+    "balance": 69.11699999999999,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-06-01",
+    "feedType": null,
+    "purchased": null,
+    "used": 17.254,
+    "balance": 51.862999999999985,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-06-02",
+    "feedType": null,
+    "purchased": null,
+    "used": 17.253,
+    "balance": 34.609999999999985,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-06-03",
+    "feedType": null,
+    "purchased": null,
+    "used": 17.178,
+    "balance": 17.431999999999984,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-06-04",
+    "feedType": null,
+    "purchased": null,
+    "used": 17.432,
+    "balance": 0.0,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-06-05",
+    "feedType": "Chick mash",
+    "purchased": 200.0,
+    "used": 17.432,
+    "balance": 182.568,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-06-06",
+    "feedType": null,
+    "purchased": null,
+    "used": 17.432,
+    "balance": 165.13600000000002,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-06-07",
+    "feedType": null,
+    "purchased": null,
+    "used": 17.432,
+    "balance": 147.70400000000004,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-06-08",
+    "feedType": null,
+    "purchased": null,
+    "used": 17.432,
+    "balance": 130.27200000000005,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-06-09",
+    "feedType": null,
+    "purchased": null,
+    "used": 17.432,
+    "balance": 112.84000000000005,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-06-10",
+    "feedType": null,
+    "purchased": null,
+    "used": 17.432,
+    "balance": 95.40800000000004,
+    "supplier": null,
+    "notes": null
+  },
+  {
+    "date": "2026-06-11",
+    "feedType": null,
+    "purchased": null,
+    "used": 17.432,
+    "balance": 77.97600000000004,
+    "supplier": null,
+    "notes": null
+  }
+]

@@ -1,0 +1,163 @@
+[
+  {
+    "week": 1,
+    "birds": 500,
+    "feedType": "Broiler Starter",
+    "feedIntakePerBirdG": 11,
+    "estWeightG": 60
+  },
+  {
+    "week": 2,
+    "birds": 470,
+    "feedType": null,
+    "feedIntakePerBirdG": 17,
+    "estWeightG": 120
+  },
+  {
+    "week": 3,
+    "birds": 470,
+    "feedType": null,
+    "feedIntakePerBirdG": 25,
+    "estWeightG": 190
+  },
+  {
+    "week": 4,
+    "birds": 470,
+    "feedType": "Chick Starter",
+    "feedIntakePerBirdG": 32,
+    "estWeightG": 275
+  },
+  {
+    "week": 5,
+    "birds": 470,
+    "feedType": null,
+    "feedIntakePerBirdG": 37,
+    "estWeightG": 360
+  },
+  {
+    "week": 6,
+    "birds": 470,
+    "feedType": null,
+    "feedIntakePerBirdG": 42,
+    "estWeightG": 450
+  },
+  {
+    "week": 7,
+    "birds": 470,
+    "feedType": null,
+    "feedIntakePerBirdG": 46,
+    "estWeightG": 540
+  },
+  {
+    "week": 8,
+    "birds": 470,
+    "feedType": null,
+    "feedIntakePerBirdG": 50,
+    "estWeightG": 630
+  },
+  {
+    "week": 9,
+    "birds": 470,
+    "feedType": null,
+    "feedIntakePerBirdG": 54,
+    "estWeightG": 720
+  },
+  {
+    "week": 10,
+    "birds": 470,
+    "feedType": "Grower Marsh",
+    "feedIntakePerBirdG": 58,
+    "estWeightG": 810
+  },
+  {
+    "week": 11,
+    "birds": 470,
+    "feedType": null,
+    "feedIntakePerBirdG": 61,
+    "estWeightG": 900
+  },
+  {
+    "week": 12,
+    "birds": 470,
+    "feedType": null,
+    "feedIntakePerBirdG": 64,
+    "estWeightG": 1000
+  },
+  {
+    "week": 13,
+    "birds": 467,
+    "feedType": null,
+    "feedIntakePerBirdG": 67,
+    "estWeightG": 1095
+  },
+  {
+    "week": 14,
+    "birds": 467,
+    "feedType": null,
+    "feedIntakePerBirdG": 70,
+    "estWeightG": 1180
+  },
+  {
+    "week": 15,
+    "birds": 467,
+    "feedType": null,
+    "feedIntakePerBirdG": 73,
+    "estWeightG": 1265
+  },
+  {
+    "week": 16,
+    "birds": 467,
+    "feedType": null,
+    "feedIntakePerBirdG": 76,
+    "estWeightG": 1350
+  },
+  {
+    "week": 17,
+    "birds": 467,
+    "feedType": null,
+    "feedIntakePerBirdG": 82,
+    "estWeightG": 1425
+  },
+  {
+    "week": 18,
+    "birds": 467,
+    "feedType": null,
+    "feedIntakePerBirdG": 89,
+    "estWeightG": 1475
+  },
+  {
+    "week": 19,
+    "birds": 467,
+    "feedType": null,
+    "feedIntakePerBirdG": 100,
+    "estWeightG": 1500
+  },
+  {
+    "week": 20,
+    "birds": 467,
+    "feedType": null,
+    "feedIntakePerBirdG": 110,
+    "estWeightG": 1550
+  },
+  {
+    "week": 21,
+    "birds": 467,
+    "feedType": "Layer 1",
+    "feedIntakePerBirdG": 115,
+    "estWeightG": 1570
+  },
+  {
+    "week": 22,
+    "birds": 467,
+    "feedType": null,
+    "feedIntakePerBirdG": 120,
+    "estWeightG": 1590
+  },
+  {
+    "week": 23,
+    "birds": 467,
+    "feedType": null,
+    "feedIntakePerBirdG": 125,
+    "estWeightG": 1600
+  }
+]

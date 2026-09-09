@@ -1,0 +1,123 @@
+[
+  {
+    "date": "2026-05-01",
+    "drug": "Vitaboost and glucose",
+    "purpose": "Stress relief and reenergization",
+    "dosage": null,
+    "duration": 1,
+    "start": "2026-05-01",
+    "end": "2026-05-01",
+    "by": "Oscar",
+    "notes": "Completed"
+  },
+  {
+    "date": "2026-05-02",
+    "drug": "Vitaboost",
+    "purpose": null,
+    "dosage": null,
+    "duration": 6,
+    "start": "2026-05-02",
+    "end": "2026-05-07",
+    "by": "Oscar",
+    "notes": "Completed"
+  },
+  {
+    "date": "2026-05-10",
+    "drug": "Amprocox",
+    "purpose": "Coccidiosis prevention",
+    "dosage": "3grams per 3L water",
+    "duration": 4,
+    "start": "2026-05-10",
+    "end": "2026-05-14",
+    "by": "Oscar",
+    "notes": "Completed"
+  },
+  {
+    "date": "2026-05-18",
+    "drug": "Amprocox",
+    "purpose": "Coccidiosis prevention",
+    "dosage": "3grams per 3L water",
+    "duration": 4,
+    "start": "2026-05-16",
+    "end": "2026-05-20",
+    "by": "Oscar",
+    "notes": "Completed"
+  },
+  {
+    "date": "2026-05-23",
+    "drug": "vitaminolyte",
+    "purpose": "Stress relief and reenergization",
+    "dosage": "3grams per 3L water",
+    "duration": 2,
+    "start": "2026-05-22",
+    "end": "2026-05-23",
+    "by": "Oscar",
+    "notes": "Completed"
+  },
+  {
+    "date": "2026-05-26",
+    "drug": "mediseryl",
+    "purpose": "Antibiotic with vitamins",
+    "dosage": "3grams per 3L water",
+    "duration": 4,
+    "start": "2026-05-23",
+    "end": "2026-05-26",
+    "by": "6 Kilo",
+    "notes": "Completed"
+  },
+  {
+    "date": "2026-05-28",
+    "drug": "2nd New Castle",
+    "purpose": "New castle prevention",
+    "dosage": null,
+    "duration": 1,
+    "start": "2026-05-28",
+    "end": "2026-05-28",
+    "by": "Oscar",
+    "notes": "Completed"
+  },
+  {
+    "date": "2026-05-31",
+    "drug": "Amprocox",
+    "purpose": "Coccidiosis prevention",
+    "dosage": "3grams per 3L water",
+    "duration": 4,
+    "start": "2026-05-30",
+    "end": "2026-06-03",
+    "by": "Oscar",
+    "notes": "Completed"
+  },
+  {
+    "date": "2026-06-05",
+    "drug": "dewormer",
+    "purpose": null,
+    "dosage": "3grams per 3L water",
+    "duration": 1,
+    "start": "2026-06-05",
+    "end": "2026-06-05",
+    "by": "Oscar",
+    "notes": "Completed"
+  },
+  {
+    "date": "2026-06-06",
+    "drug": "fowl pox",
+    "purpose": "fowl pox prevention",
+    "dosage": "Injection in wings",
+    "duration": 1,
+    "start": "2026-06-06",
+    "end": "2026-06-06",
+    "by": "Oscar",
+    "notes": "Completed"
+  },
+  {
+    "date": "2026-06-08",
+    "drug": "tylodoxine",
+    "purpose": "Antibiotic",
+    "dosage": "3grams per 3L water",
+    "duration": 4,
+    "start": "2026-06-08",
+    "end": "2026-06-11",
+    "by": "6 kilo",
+    "notes": "Completed"
+  }
+]
