@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "6.2.0";
+const APP_VERSION = "6.2.3";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -606,7 +606,7 @@ export default function EduSmart() {
     if (!cloudSync?.enabled) return;
     if (timetablesPushTimer.current) clearTimeout(timetablesPushTimer.current);
     timetablesPushTimer.current = setTimeout(() => {
-      cloudSync.pushTimetablesToCloud(timetables);
+      cloudSync.pushTimetablesToCloud(timetables).then(r => { if (!r.success) notify(`Timetable didn't sync: ${r.error}`, "error"); });
     }, 1000);
     return () => { if (timetablesPushTimer.current) clearTimeout(timetablesPushTimer.current); };
   }, [timetables, cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -623,7 +623,11 @@ export default function EduSmart() {
     if (!cloudSync?.enabled) return;
     if (schoolPushTimer.current) clearTimeout(schoolPushTimer.current);
     schoolPushTimer.current = setTimeout(() => {
-      cloudSync.pushSchoolProfileToCloud(school);
+      // This used to fail silently on every save if a column was
+      // ever missing — now any real failure shows up right where the
+      // edit was made, instead of only being discoverable by
+      // comparing two devices days later.
+      cloudSync.pushSchoolProfileToCloud(school).then(r => { if (!r.success) notify(`School Profile didn't sync: ${r.error}`, "error"); });
     }, 1000);
     return () => { if (schoolPushTimer.current) clearTimeout(schoolPushTimer.current); };
   }, [school, cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -638,7 +642,7 @@ export default function EduSmart() {
     if (!cloudSync?.enabled) return;
     if (classesConfigPushTimer.current) clearTimeout(classesConfigPushTimer.current);
     classesConfigPushTimer.current = setTimeout(() => {
-      cloudSync.pushClassesConfigToCloud({ classes, classLevels, subjects });
+      cloudSync.pushClassesConfigToCloud({ classes, classLevels, subjects }).then(r => { if (!r.success) notify(`Classes & Subjects didn't sync: ${r.error}`, "error"); });
     }, 1000);
     return () => { if (classesConfigPushTimer.current) clearTimeout(classesConfigPushTimer.current); };
   }, [classes, classLevels, subjects, cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -655,7 +659,7 @@ export default function EduSmart() {
     if (!cloudSync?.enabled) return;
     if (yearArchivePushTimer.current) clearTimeout(yearArchivePushTimer.current);
     yearArchivePushTimer.current = setTimeout(() => {
-      cloudSync.pushYearArchiveToCloud(yearArchive);
+      cloudSync.pushYearArchiveToCloud(yearArchive).then(r => { if (!r.success) notify(`Year Archive didn't sync: ${r.error}`, "error"); });
     }, 1000);
     return () => { if (yearArchivePushTimer.current) clearTimeout(yearArchivePushTimer.current); };
   }, [yearArchive, cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -4164,6 +4168,19 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
       if (cfg.classes) setClasses(cfg.classes);
       if (cfg.classLevels) setClassLevels(cfg.classLevels);
       if (cfg.subjects) setSubjects(cfg.subjects);
+    });
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Same refresh-on-open behavior for School Profile — this was
+  // missing before, which meant a change made directly in Supabase,
+  // or on another device, stayed invisible on this screen until a
+  // fresh join or an explicit Sync Now happened to trigger a pull.
+  useEffect(() => {
+    if (tab!=="school" || !cloudSync?.enabled) return;
+    cloudSync.fetchSchoolProfileFromCloud().then(fields => {
+      if (!fields) return;
+      setSchool(prev => ({ ...prev, ...fields }));
+      setForm(prev => ({ ...prev, ...fields }));
     });
   }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 

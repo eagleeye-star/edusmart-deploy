@@ -185,8 +185,20 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
       // particular call wasn't about them.
       if (schoolInfo.classesConfigJson !== undefined) patch.classes_config_json = schoolInfo.classesConfigJson;
       if (schoolInfo.yearArchiveJson !== undefined) patch.year_archive_json = schoolInfo.yearArchiveJson;
-      const { error } = await supabaseClient.from("schools").update(patch).eq("id", schoolId);
+      // .select() here is deliberate, not decorative: an UPDATE whose
+      // WHERE clause matches zero rows (a wrong/stale schoolId, or a
+      // row RLS silently filters out) returns success with NO error
+      // at all — PostgREST doesn't treat "changed nothing" as a
+      // failure. Without asking for the row back, that failure mode
+      // is invisible. If data comes back empty, nothing was actually
+      // written, and the caller needs to know that same as any other
+      // failure — found this gap while directly investigating why a
+      // profile update might silently not take effect.
+      const { data, error } = await supabaseClient.from("schools").update(patch).eq("id", schoolId).select();
       if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error(`Update matched no school row for id ${schoolId} — the row may not exist, or access was denied.`);
+      }
     },
 
     // Renewing on one device pushes the new licence here; every other
