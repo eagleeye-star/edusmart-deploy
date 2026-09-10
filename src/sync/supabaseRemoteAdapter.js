@@ -173,7 +173,7 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
     // information instead of blank fields.
     async updateSchoolInfo(schoolId, schoolInfo) {
       const patch = {
-        address: schoolInfo.address, phone: schoolInfo.phone, email: schoolInfo.email,
+        name: schoolInfo.name, address: schoolInfo.address, phone: schoolInfo.phone, email: schoolInfo.email,
         motto: schoolInfo.motto, current_term: schoolInfo.currentTerm, current_year: schoolInfo.currentYear,
         principal_name: schoolInfo.principalName, logo_url: schoolInfo.logo, term_start_date: schoolInfo.termStartDate,
         timetables_json: schoolInfo.timetablesJson,
