@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "6.2.4";
+const APP_VERSION = "6.2.7";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -63,8 +63,8 @@ const ROLE_ACCESS = {
   "Headmaster":           ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","kindergarten","exams","promotion","history"],
   "HOD":                  ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","kindergarten","exams","promotion","history"],
   "Teacher":              ["dashboard","grades","attendance","timetable","exams","communication"],
-  "Account Office":       ["finance","payroll"],
-  "Librarian":            ["library"],
+  "Account Office":       ["dashboard","finance","payroll"],
+  "Librarian":            ["dashboard","library"],
   "Non-Teaching Staff":   ["dashboard"],
 };
 
@@ -1234,6 +1234,25 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
     return <TeacherDashboard school={school} students={students} grades={grades} attendance={attendance}
       examSchedule={examSchedule} mockExams={mockExams} curUser={curUser}/>;
   }
+  if (curUser?.role === "Non-Teaching Staff") {
+    return <StaffDashboard school={school} students={students} users={users} curUser={curUser}/>;
+  }
+  // Admin/Headmaster/HOD are the only roles meant to see the whole
+  // school at once — everyone else should only see alerts and stats
+  // for their own actual domain. Previously every one of these
+  // widgets showed unconditionally to any non-Teacher role, meaning
+  // a Librarian saw fee arrears and an Account Office person saw
+  // overdue library books — neither is their concern, and neither
+  // should be visible to them.
+  const role = curUser?.role;
+  const isHigherAuthority = role==="Admin"||role==="Headmaster"||role==="HOD";
+  const canSeeFinance = isHigherAuthority || role==="Account Office";
+  const canSeeLibrary = isHigherAuthority || role==="Librarian";
+  // General school-wide figures (enrollment, staff count, attendance,
+  // class performance) stay with the higher-authority tier only —
+  // Account Office and Librarian get just their own domain, not the
+  // whole school's overview alongside it.
+  const canSeeGeneral = isHigherAuthority;
   const active = students.filter(s=>s.status==="active");
   const totalPaid = fees.reduce((a,f)=>a+f.paid,0);
   const totalExp  = expenses.reduce((a,e)=>a+e.amount,0);
@@ -1250,7 +1269,7 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
         <p style={{ color:"#64748b",margin:"4px 0 0",fontSize:13 }}>{school.name} · {school.currentTerm} {school.currentYear}</p>
       </div>
 
-      {smsBalanceInfo?.estimatedBalance!=null && smsBalanceInfo.estimatedBalance<LOW_BALANCE_THRESHOLD && (
+      {isHigherAuthority && smsBalanceInfo?.estimatedBalance!=null && smsBalanceInfo.estimatedBalance<LOW_BALANCE_THRESHOLD && (
         <div style={{ background:"#fef3c7",border:"1px solid #fcd34d",borderRadius:10,padding:"12px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:10 }}>
           <span style={{ fontSize:18 }}>📱</span>
           <div style={{ fontSize:13,color:"#92400e" }}>
@@ -1260,19 +1279,19 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
       )}
 
       {/* ALERTS */}
-      {(absentAlerts.length>0||overdueBooks.length>0||noStock.length>0)&&(
+      {((canSeeGeneral&&absentAlerts.length>0)||(canSeeLibrary&&(overdueBooks.length>0||noStock.length>0)))&&(
         <div style={{ marginBottom:20 }}>
-          {absentAlerts.map(s=>(
+          {canSeeGeneral&&absentAlerts.map(s=>(
             <div key={s.id} style={{ background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,padding:"10px 16px",marginBottom:8,fontSize:13,color:"#9a3412" }}>
               ⚠️ <strong>{s.name}</strong> ({s.class}) has been absent 3+ consecutive days
             </div>
           ))}
-          {overdueBooks.map(b=>{ const bk=books?.find(x=>x.id===b.bookId); return (
+          {canSeeLibrary&&overdueBooks.map(b=>{ const bk=books?.find(x=>x.id===b.bookId); return (
             <div key={b.id} style={{ background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:"10px 16px",marginBottom:8,fontSize:13,color:"#991b1b" }}>
               📚 Overdue: <strong>{bk?.title}</strong> — due {b.dueDate}
             </div>
           );})}
-          {noStock.map(b=>(
+          {canSeeLibrary&&noStock.map(b=>(
             <div key={b.id} style={{ background:"#fef9c3",border:"1px solid #fde047",borderRadius:10,padding:"10px 16px",marginBottom:8,fontSize:13,color:"#713f12" }}>
               📦 Out of stock: <strong>{b.title}</strong> (0 copies available)
             </div>
@@ -1281,18 +1300,19 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
       )}
 
       <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:12,marginBottom:24 }}>
-        <StatCard icon="🎒" label="Active Students"  value={active.length}              color="#3b82f6"/>
-        <StatCard icon="👥" label="Active Staff"     value={users.filter(u=>u.active).length} color="#8b5cf6"/>
-        <StatCard icon="💰" label="Fees Collected"   value={formatGHS(totalPaid)}        color="#10b981"/>
-        <StatCard icon="📤" label="Total Expenses"   value={formatGHS(totalExp)}          color="#f59e0b"/>
-        <StatCard icon="🏦" label="Net Balance"      value={formatGHS(totalPaid-totalExp)} color={(totalPaid-totalExp)>=0?"#0369a1":"#dc2626"}/>
-        <StatCard icon="✅" label="Present Today"    value={`${present}/${active.length}`} color="#0ea5e9"/>
-        <StatCard icon="⚠️" label="Fee Arrears"      value={feeAlerts.length}             color="#ef4444" sub="students with balance"/>
-        <StatCard icon="📚" label="Overdue Books"    value={overdueBooks.length}          color="#dc2626"/>
+        {canSeeGeneral&&<StatCard icon="🎒" label="Active Students"  value={active.length}              color="#3b82f6"/>}
+        {canSeeGeneral&&<StatCard icon="👥" label="Active Staff"     value={users.filter(u=>u.active).length} color="#8b5cf6"/>}
+        {canSeeFinance&&<StatCard icon="💰" label="Fees Collected"   value={formatGHS(totalPaid)}        color="#10b981"/>}
+        {canSeeFinance&&<StatCard icon="📤" label="Total Expenses"   value={formatGHS(totalExp)}          color="#f59e0b"/>}
+        {canSeeFinance&&<StatCard icon="🏦" label="Net Balance"      value={formatGHS(totalPaid-totalExp)} color={(totalPaid-totalExp)>=0?"#0369a1":"#dc2626"}/>}
+        {canSeeGeneral&&<StatCard icon="✅" label="Present Today"    value={`${present}/${active.length}`} color="#0ea5e9"/>}
+        {canSeeFinance&&<StatCard icon="⚠️" label="Fee Arrears"      value={feeAlerts.length}             color="#ef4444" sub="students with balance"/>}
+        {canSeeLibrary&&<StatCard icon="📚" label="Overdue Books"    value={overdueBooks.length}          color="#dc2626"/>}
       </div>
 
-      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16 }}>
-        <Card style={{ padding:18 }}>
+      {(canSeeGeneral||canSeeFinance)&&(
+      <div style={{ display:"grid",gridTemplateColumns:canSeeGeneral&&canSeeFinance?"1fr 1fr":"1fr",gap:16,marginBottom:16 }}>
+        {canSeeGeneral&&<Card style={{ padding:18 }}>
           <h3 style={{ margin:"0 0 12px",fontSize:15,color:"#0f172a" }}>📊 Class Performance</h3>
           {Object.entries(classPerf).slice(0,6).map(([cls,scores])=>{
             const avg=Math.round(scores.reduce((a,b)=>a+b,0)/scores.length);
@@ -1308,8 +1328,8 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
             );
           })}
           {bestClass&&<p style={{ margin:"10px 0 0",fontSize:12,color:"#0369a1" }}>🏆 Best: <strong>{bestClass[0]}</strong> ({Math.round(bestClass[1].reduce((a,b)=>a+b,0)/bestClass[1].length)}% avg)</p>}
-        </Card>
-        <Card style={{ padding:18 }}>
+        </Card>}
+        {canSeeFinance&&<Card style={{ padding:18 }}>
           <h3 style={{ margin:"0 0 12px",fontSize:15,color:"#0f172a" }}>💸 Fee Arrears</h3>
           {feeAlerts.slice(0,6).map(s=>{
             const balances = computeStudentFeeBalances(s, (feeTypes||[]).filter(ft=>ft.active), fees, school.termStartDate);
@@ -1329,8 +1349,9 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
             </div>
           );})}
           {feeAlerts.length===0&&<p style={{ color:"#16a34a",fontSize:13 }}>✅ All fees cleared!</p>}
-        </Card>
+        </Card>}
       </div>
+      )}
     </div>
   );
 }
@@ -1440,6 +1461,45 @@ function TeacherDashboard({ school,students,grades,attendance,examSchedule,mockE
   );
 }
 
+// ─── NON-TEACHING STAFF DASHBOARD ──────────────────────────────
+// A friendly, genuinely neutral landing page for staff with no
+// specific domain (security, cleaning, driving, catering, etc.) —
+// no financial figures, no attendance specifics, no student records,
+// just the general shape of the school and a warm welcome. Previously
+// this role saw an almost entirely blank page, since every widget on
+// the main Dashboard is correctly gated to a role's own domain and
+// this role doesn't have one.
+function StaffDashboard({ school,students,users,curUser }) {
+  const activeStudents = students.filter(s=>s.status==="active").length;
+  const activeStaff = users.filter(u=>u.active).length;
+  const today = new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+
+  return (
+    <div>
+      <div style={{ marginBottom:24 }}>
+        <h2 style={{ fontSize:22,fontWeight:700,color:"#0f172a",margin:0 }}>Good day, {curUser?.name?.split(" ")[0]} 👋</h2>
+        <p style={{ color:"#64748b",margin:"4px 0 0",fontSize:13 }}>{school.name} · {school.currentTerm} {school.currentYear}</p>
+      </div>
+
+      <Card style={{ padding:24,marginBottom:20,textAlign:"center",background:"#f0f9ff" }}>
+        <div style={{ fontSize:32,marginBottom:8 }}>📅</div>
+        <div style={{ fontSize:16,fontWeight:600,color:"#0f172a" }}>{today}</div>
+      </Card>
+
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:12,marginBottom:20 }}>
+        <StatCard icon="🎒" label="Students Enrolled" value={activeStudents} color="#3b82f6"/>
+        <StatCard icon="👥" label="Staff at School" value={activeStaff} color="#8b5cf6"/>
+      </div>
+
+      <Card style={{ padding:18 }}>
+        <h3 style={{ margin:"0 0 10px",fontSize:15,color:"#0f172a" }}>ℹ️ School Contact</h3>
+        <p style={{ margin:"0 0 4px",fontSize:13,color:"#374151" }}>{school.address}</p>
+        <p style={{ margin:"0 0 4px",fontSize:13,color:"#374151" }}>📞 {school.phone}</p>
+        <p style={{ margin:0,fontSize:13,color:"#374151" }}>✉️ {school.email}</p>
+      </Card>
+    </div>
+  );
+}
 
 function Students({ students,setStudents,notify,addAudit,curUser,classes,classLevels,initialSearch,cloudSync,feeTypes }) {
   const [search,setSearch]=useState(initialSearch||""); const [fc,setFc]=useState(""); const [fs,setFs]=useState("all");
@@ -1929,16 +1989,25 @@ function Grades({ grades,setGrades,students,curUser,notify,addAudit,classes,subj
 
 // ─── EXAMS ───────────────────────────────────────────────────
 function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,curUser,notify,addAudit,classes,subjects,cloudSync }) {
+  const isTeacher=curUser?.role==="Teacher"; const myClass=isTeacher?curUser?.classAssigned:null;
   const [tab,setTab]=useState("schedule");
   const [showSched,setShowSched]=useState(false); const [showMock,setShowMock]=useState(false);
-  const schedBlank={ class:"JHS 3",subject:getExamSubjects(subjects)[0],date:"",startTime:"08:00",endTime:"10:00",venue:"Main Hall" };
+  const schedBlank={ class:myClass||"JHS 3",subject:getExamSubjects(subjects)[0],date:"",startTime:"08:00",endTime:"10:00",venue:"Main Hall" };
   const mockBlank={ studentId:"",subject:getExamSubjects(subjects)[0],score:"",examType:"Mock 1",term:"Term 2",year:"2024/2025" };
   const [sf,setSf]=useState(schedBlank); const [mf,setMf]=useState(mockBlank);
 
+  // A teacher only ever sees and enters data for their own class —
+  // same restriction already correctly applied in Grades and
+  // Attendance. This was missing here entirely: any teacher could
+  // previously see (and enter mock results for) every other class.
   const jhs3 = students.filter(s=>s.class==="JHS 3"&&s.status==="active");
-  const examSort = useSort(examSchedule, "date");
-  const mockEnriched = mockExams.map(m=>({ ...m, studentName: students.find(x=>x.id===m.studentId)?.name||m.studentId, className: students.find(x=>x.id===m.studentId)?.class }));
+  const visibleExamSchedule = examSchedule.filter(e=>!isTeacher||e.class===myClass);
+  const examSort = useSort(visibleExamSchedule, "date");
+  const mockEnriched = mockExams
+    .map(m=>({ ...m, studentName: students.find(x=>x.id===m.studentId)?.name||m.studentId, className: students.find(x=>x.id===m.studentId)?.class }))
+    .filter(m=>!isTeacher||m.className===myClass);
   const mockSort = useSort(mockEnriched, "date", "desc");
+  const mockStudentOptions = students.filter(s=>s.status==="active"&&(!isTeacher||s.class===myClass));
 
   const saveSched=()=>{
     if(!sf.date||!sf.subject){ notify("Date and subject required","error"); return; }
@@ -1950,14 +2019,18 @@ function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,cu
 
   const saveMock=()=>{
     if(!mf.studentId||mf.score===""){ notify("Student and score required","error"); return; }
+    if(isTeacher && students.find(s=>s.id===mf.studentId)?.class!==myClass){ notify("You can only enter results for your own class","error"); return; }
     const newMock = {id:uid("MCK"),...mf,score:+mf.score,enteredBy:curUser.code,date:todayStr()};
     setMockExams(p=>[...p,newMock]);
     cloudSync?.writeThrough("mock_exams", newMock);
     addAudit(`Mock result: ${mf.subject}`,"Exams"); notify("Mock result saved"); setShowMock(false); setMf(mockBlank);
   };
 
-  // BECE prediction based on mock averages
-  const beceRisk = jhs3.map(s=>{
+  // BECE prediction based on mock averages — a non-JHS-3 teacher has
+  // no reason to see JHS 3's data here, same reasoning as everywhere
+  // else in this fix.
+  const beceStudents = (isTeacher && myClass!=="JHS 3") ? [] : jhs3;
+  const beceRisk = beceStudents.map(s=>{
     const mocks = mockExams.filter(m=>m.studentId===s.id);
     if(!mocks.length) return { ...s, avg:null, risk:"No Data" };
     const avg = Math.round(mocks.reduce((a,m)=>a+m.score,0)/mocks.length);
@@ -2014,7 +2087,7 @@ function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,cu
           </div>
           {showMock&&(
             <Modal title="Enter Mock Result" onClose={()=>setShowMock(false)}>
-              <Row label="Student"><select value={mf.studentId} onChange={e=>setMf(p=>({...p,studentId:e.target.value}))} style={inp}><option value="">Select</option>{students.filter(s=>s.status==="active").map(s=><option key={s.id} value={s.id}>{s.name} — {s.class}</option>)}</select></Row>
+              <Row label="Student"><select value={mf.studentId} onChange={e=>setMf(p=>({...p,studentId:e.target.value}))} style={inp}><option value="">Select</option>{mockStudentOptions.map(s=><option key={s.id} value={s.id}>{s.name} — {s.class}</option>)}</select></Row>
               <Row label="Subject"><select value={mf.subject} onChange={e=>setMf(p=>({...p,subject:e.target.value}))} style={inp}>{getExamSubjects(subjects).map(s=><option key={s}>{s}</option>)}</select></Row>
               <Row label="Score (0–100)"><input type="number" min={0} max={100} value={mf.score} onChange={e=>setMf(p=>({...p,score:e.target.value}))} style={inp}/></Row>
               <Row label="Exam Type"><select value={mf.examType} onChange={e=>setMf(p=>({...p,examType:e.target.value}))} style={inp}><option>Mock 1</option><option>Mock 2</option><option>Mock 3</option><option>Pre-BECE</option></select></Row>
@@ -3096,7 +3169,17 @@ function Timetable({ timetables,setTimetables,curUser,cloudSync }) {
         <div style={{ display:"flex",gap:8,alignItems:"center" }}>
           {!isTeacher&&<select value={selClass} onChange={e=>setSelClass(e.target.value)} style={{ ...inp,width:160 }}>{Object.keys(timetables).map(c=><option key={c}>{c}</option>)}</select>}
           {isTeacher&&<div style={{ padding:"8px 14px",background:"#dbeafe",borderRadius:8,fontSize:13,color:"#1d4ed8",fontWeight:600 }}>📌 {selClass}</div>}
-          {!isTeacher&&<button onClick={()=>setEditMode(!editMode)} style={{ ...editMode?{...btnS}:btnP,padding:"8px 14px" }}>{editMode?"✅ Done Editing":"✏️ Edit Timetable"}</button>}
+          {!isTeacher&&<button onClick={()=>{
+            // Clicking Done Editing directly after typing a new
+            // subject — without pressing Enter first — used to
+            // silently discard that edit, since only Enter actually
+            // committed it to the timetable. Done Editing now commits
+            // whatever's currently open before exiting edit mode, so
+            // the natural "type it, then click Done" flow works.
+            if (editCell) saveCell();
+            if (editTimeRow !== null) saveTimeRow(editTimeRow);
+            setEditMode(!editMode);
+          }} style={{ ...editMode?{...btnS}:btnP,padding:"8px 14px" }}>{editMode?"✅ Done Editing":"✏️ Edit Timetable"}</button>}
         </div>
       </div>
       {tt?(
@@ -3110,7 +3193,7 @@ function Timetable({ timetables,setTimetables,curUser,cloudSync }) {
               {tt[0].periods.map((p,pi)=>(
                 <tr key={pi} style={{ borderBottom:"1px solid #f1f5f9" }}>
                   <td style={{ padding:"8px 12px",fontWeight:600,color:"#374151",background:"#f8fafc",whiteSpace:"nowrap",cursor:editMode?"pointer":"default" }}
-                    onClick={()=>{ if(editMode){ setEditTimeRow(pi); setEditTimeVal(p.time); } }}>
+                    onClick={()=>{ if(editMode){ if(editCell) saveCell(); setEditTimeRow(pi); setEditTimeVal(p.time); } }}>
                     {editTimeRow===pi ? (
                       <input value={editTimeVal} onChange={e=>setEditTimeVal(e.target.value)} placeholder="e.g. 7:30-8:30"
                         style={{ width:100,padding:"3px 6px",borderRadius:4,border:"1px solid #93c5fd",fontSize:11 }}
@@ -3124,7 +3207,7 @@ function Timetable({ timetables,setTimetables,curUser,cloudSync }) {
                     const isEditing=editMode&&editCell?.dayIdx===di&&editCell?.periodIdx===pi;
                     return (
                       <td key={di} style={{ padding:"6px 10px",textAlign:"center",background:isBreak?"#f1f5f9":dayColors[di%5],cursor:editMode&&!isBreak?"pointer":"default" }}
-                        onClick={()=>{ if(editMode&&!isBreak){ setEditCell({dayIdx:di,periodIdx:pi}); setEditVal(per.subject); }}}>
+                        onClick={()=>{ if(editMode&&!isBreak){ if(editTimeRow!==null) saveTimeRow(editTimeRow); if(editCell) saveCell(); setEditCell({dayIdx:di,periodIdx:pi}); setEditVal(per.subject); }}}>
                         {isEditing?(
                           <div onClick={e=>e.stopPropagation()}>
                             <input value={editVal} onChange={e=>setEditVal(e.target.value)} style={{ width:"90%",padding:"3px 6px",borderRadius:4,border:"1px solid #93c5fd",fontSize:11 }}
@@ -3174,7 +3257,14 @@ function Communication({ students,school,curUser,fees,attendance,classes,feeType
     return `${h12}:${String(m).padStart(2,"0")}${period}`;
   };
 
-  const activeStudents=students.filter(s=>s.status==="active");
+  const isTeacher = curUser?.role==="Teacher"; const myClass = isTeacher?curUser?.classAssigned:null;
+  // Every other teacher-accessible section (Grades, Attendance, Exams)
+  // restricts a teacher to their own class — Communication had no such
+  // restriction at all until now, meaning a teacher could message any
+  // class's parents, not just their own. Filtering the student pool
+  // once here cascades correctly to the single-student picker, class
+  // filters, and Bulk Send, without needing separate fixes in each.
+  const activeStudents=students.filter(s=>s.status==="active"&&(!isTeacher||s.class===myClass));
   const classStudents=selClass?activeStudents.filter(s=>s.class===selClass):activeStudents;
   const selStudent=students.find(s=>s.id===selStu);
 
@@ -3562,7 +3652,7 @@ ${school.principalName||"The Principal"}`,
               <Row label="Who">
                 <div style={{ display:"flex",gap:8 }}>
                   <button onClick={()=>{setBulkAudience("students");}} style={{ ...btnSm,flex:1,padding:"8px",background:bulkAudience==="students"?"#1e40af":"#f1f5f9",color:bulkAudience==="students"?"#fff":"#374151" }}>👨‍👩‍👧 Parents</button>
-                  <button onClick={()=>{setBulkAudience("staff");setBulkTemplateType("custom");}} style={{ ...btnSm,flex:1,padding:"8px",background:bulkAudience==="staff"?"#1e40af":"#f1f5f9",color:bulkAudience==="staff"?"#fff":"#374151" }}>🧑‍🏫 Staff</button>
+                  {!isTeacher&&<button onClick={()=>{setBulkAudience("staff");setBulkTemplateType("custom");}} style={{ ...btnSm,flex:1,padding:"8px",background:bulkAudience==="staff"?"#1e40af":"#f1f5f9",color:bulkAudience==="staff"?"#fff":"#374151" }}>🧑‍🏫 Staff</button>}
                 </div>
               </Row>
               <Row label="Send Via">
