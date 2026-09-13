@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "6.2.7";
+const APP_VERSION = "6.2.9";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -490,6 +490,12 @@ export default function EduSmart() {
   const [loggingIn, setLoggingIn] = useState(false);
   const [recoveryKey, setRecoveryKey] = useState("");
   const [section,   setSection]   = useState("dashboard");
+  // For the sidebar "Sync Now" — previously only reachable via
+  // Settings → Cloud Sync, which Teachers (and other non-admin roles)
+  // don't have access to at all. If something genuinely gets stuck,
+  // they had no way to even attempt a fix or see why, unlike Admin.
+  const [sidebarSyncBusy,setSidebarSyncBusy]=useState(false);
+  const [showStuckDetails,setShowStuckDetails]=useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [quickQuery, setQuickQuery] = useState("");
   const [jumpSearch, setJumpSearch] = useState("");
@@ -998,12 +1004,48 @@ export default function EduSmart() {
             <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:8,fontSize:11 }}>
               <span style={{
                 width:8,height:8,borderRadius:"50%",display:"inline-block",
-                background:cloudSync.status.phase==="online"?"#22c55e":cloudSync.status.phase==="offline"?"#ef4444":"#f59e0b",
+                background:cloudSync.status.phase==="online"?(cloudSync.status.pending>0?"#f59e0b":"#22c55e"):cloudSync.status.phase==="offline"?"#ef4444":"#f59e0b",
               }}/>
               <span style={{ color:"#94a3b8" }}>
-                {cloudSync.status.phase==="online"?"Synced":cloudSync.status.phase==="offline"?"Offline":"Connecting"}
+                {/* "Synced" previously meant only "the connection is
+                    reachable," even with records still waiting to go
+                    through — showing "Synced · 1 pending" in the same
+                    breath read as a contradiction. Now it only says
+                    Synced once nothing is actually waiting. */}
+                {cloudSync.status.phase==="offline"?"Offline":cloudSync.status.phase==="connecting"?"Connecting":cloudSync.status.pending>0?"Syncing":"Synced"}
                 {cloudSync.status.pending>0?` · ${cloudSync.status.pending} pending`:""}
               </span>
+            </div>
+          )}
+          {cloudSync?.enabled && (
+            <div style={{ marginBottom:8 }}>
+              <button
+                onClick={async()=>{
+                  setSidebarSyncBusy(true);
+                  await cloudSync.syncNow();
+                  setSidebarSyncBusy(false);
+                }}
+                disabled={sidebarSyncBusy}
+                style={{ width:"100%",fontSize:11,padding:"5px 8px",borderRadius:6,border:"1px solid #334155",background:"#1e293b",color:"#cbd5e1",cursor:sidebarSyncBusy?"default":"pointer" }}>
+                {sidebarSyncBusy?"Syncing...":"🔄 Sync Now"}
+              </button>
+              {cloudSync.status.stuck?.length>0 && (
+                <>
+                  <button onClick={()=>setShowStuckDetails(p=>!p)} style={{ width:"100%",fontSize:10,padding:"4px 8px",marginTop:4,borderRadius:6,border:"1px solid #7c2d12",background:"#431407",color:"#fdba74",cursor:"pointer" }}>
+                    ⚠️ {cloudSync.status.stuck.length} record(s) not syncing — {showStuckDetails?"hide":"why?"}
+                  </button>
+                  {showStuckDetails && (
+                    <div style={{ maxHeight:140,overflowY:"auto",background:"#1e293b",borderRadius:6,padding:6,marginTop:4 }}>
+                      {cloudSync.status.stuck.map((e,i)=>(
+                        <div key={i} style={{ fontSize:9,color:"#cbd5e1",padding:"3px 0",borderBottom:i<cloudSync.status.stuck.length-1?"1px solid #334155":"none" }}>
+                          <strong>{e.table}</strong>{e.name?` (${e.name})`:""} — tried {e.attempts}×<br/>
+                          <span style={{ color:"#fca5a5" }}>{e.lastError||"Unknown error"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
           <div style={{ fontSize:12,color:"#94a3b8",marginBottom:2 }}>{curUser?.name}</div>
