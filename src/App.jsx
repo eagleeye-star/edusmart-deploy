@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "6.3.1";
+const APP_VERSION = "6.3.2";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -62,7 +62,7 @@ const ROLE_ACCESS = {
   "Admin":                ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","kindergarten","exams","promotion","history"],
   "Headmaster":           ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","kindergarten","exams","promotion","history"],
   "HOD":                  ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","kindergarten","exams","promotion","history"],
-  "Teacher":              ["dashboard","grades","attendance","timetable","exams","communication"],
+  "Teacher":              ["dashboard","grades","attendance","timetable","exams","communication","reports"],
   "Account Office":       ["dashboard","finance","payroll"],
   "Librarian":            ["dashboard","library"],
   "Non-Teaching Staff":   ["dashboard"],
@@ -1952,6 +1952,14 @@ function Grades({ grades,setGrades,students,curUser,notify,addAudit,classes,subj
     if(!form.studentId||!form.subject||form.ca===""||form.exam===""){ notify("All fields required","error"); return; }
     if(+form.ca<0||+form.ca>30){ notify("CA must be 0–30","error"); return; }
     if(+form.exam<0||+form.exam>70){ notify("Exam must be 0–70","error"); return; }
+    // A student can only have ONE grade per subject per term/year —
+    // without this check, nothing stopped a second entry from being
+    // created instead of editing the first, leaving two conflicting
+    // scores for the same subject with no clear "correct" one.
+    if(!editId){
+      const dup = grades.find(g=>g.studentId===form.studentId&&g.subject===form.subject&&g.term===form.term&&g.year===form.year);
+      if(dup){ notify(`A grade already exists for this student in ${form.subject} (${form.term}, ${form.year}) — edit that one instead of adding a new one.`,"error"); return; }
+    }
     const score=totalScore(form.ca,form.exam); const grade=calcGrade(score);
     // class was never actually being set on a grade record at all —
     // this is the exact cause of "null value in column class violates
@@ -3923,9 +3931,10 @@ ${school.principalName||"The Principal"}`,
 }
 
 // ─── REPORTS ─────────────────────────────────────────────────
-function Reports({ students,grades,attendance,fees,expenses,school,classes,subjects,feeTypes }) {
+function Reports({ students,grades,attendance,fees,expenses,school,classes,subjects,feeTypes,curUser }) {
+  const isTeacher = curUser?.role==="Teacher"; const myClass = isTeacher?curUser?.classAssigned:null;
   const [rt,setRt]=useState("student");
-  const [sc,setSc]=useState(classes[5]); const [ss,setSs]=useState(""); const [st,setSt]=useState("Term 1");
+  const [sc,setSc]=useState(myClass||classes[5]); const [ss,setSs]=useState(""); const [st,setSt]=useState("Term 1");
 
   const classStu=students.filter(s=>s.status==="active"&&s.class===sc);
   const sg=(sid,term)=>grades.filter(g=>g.studentId===sid&&g.term===term);
@@ -3943,12 +3952,14 @@ function Reports({ students,grades,attendance,fees,expenses,school,classes,subje
         }
       `}</style>
       <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>📋 Reports</h2>
-      <Tabs tabs={[{key:"student",label:"Student Report Card"},{key:"subject",label:"Subject Analysis"},{key:"school",label:"School Dashboard"}]} active={rt} onChange={setRt}/>
+      {!isTeacher && <Tabs tabs={[{key:"student",label:"Student Report Card"},{key:"subject",label:"Subject Analysis"},{key:"school",label:"School Dashboard"}]} active={rt} onChange={setRt}/>}
 
       {rt==="student"&&(
         <div>
           <div style={{ display:"flex",gap:8,marginBottom:14,flexWrap:"wrap" }}>
-            <select value={sc} onChange={e=>{setSc(e.target.value);setSs("");}} style={{ ...inp,width:160 }}>{classes.map(c=><option key={c}>{c}</option>)}</select>
+            {isTeacher
+              ? <div style={{ padding:"8px 14px",background:"#dbeafe",borderRadius:8,fontSize:13,color:"#1d4ed8",fontWeight:600 }}>📌 {sc}</div>
+              : <select value={sc} onChange={e=>{setSc(e.target.value);setSs("");}} style={{ ...inp,width:160 }}>{classes.map(c=><option key={c}>{c}</option>)}</select>}
             <select value={ss} onChange={e=>setSs(e.target.value)} style={{ ...inp,width:220 }}><option value="">Select student</option>{classStu.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select>
             <select value={st} onChange={e=>setSt(e.target.value)} style={{ ...inp,width:120 }}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
           </div>
