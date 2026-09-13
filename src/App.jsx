@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "6.2.9";
+const APP_VERSION = "6.3.0";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -1953,13 +1953,19 @@ function Grades({ grades,setGrades,students,curUser,notify,addAudit,classes,subj
     if(+form.ca<0||+form.ca>30){ notify("CA must be 0–30","error"); return; }
     if(+form.exam<0||+form.exam>70){ notify("Exam must be 0–70","error"); return; }
     const score=totalScore(form.ca,form.exam); const grade=calcGrade(score);
+    // class was never actually being set on a grade record at all —
+    // this is the exact cause of "null value in column class violates
+    // not-null constraint" that was silently blocking every grade
+    // from syncing. Filling it in from the student's own record here,
+    // going forward.
+    const studentClass = students.find(s=>s.id===form.studentId)?.class || "";
     if(editId){
-      const updated = {...grades.find(g=>g.id===editId),...form,ca:+form.ca,exam:+form.exam,score,grade,enteredBy:curUser.code,date:todayStr()};
+      const updated = {...grades.find(g=>g.id===editId),...form,class:studentClass,ca:+form.ca,exam:+form.exam,score,grade,enteredBy:curUser.code,date:todayStr()};
       setGrades(p=>p.map(g=>g.id===editId?updated:g));
       cloudSync?.writeThrough("grades", updated);
       addAudit(`Edited grade`,"Grades"); notify("Grade updated");
     } else {
-      const newGrade = {id:uid("GRD"),...form,ca:+form.ca,exam:+form.exam,score,grade,enteredBy:curUser.code,date:todayStr()};
+      const newGrade = {id:uid("GRD"),...form,class:studentClass,ca:+form.ca,exam:+form.exam,score,grade,enteredBy:curUser.code,date:todayStr()};
       setGrades(p=>[...p,newGrade]);
       cloudSync?.writeThrough("grades", newGrade);
       addAudit(`Grade entered: ${form.subject}`,"Grades"); notify("Grade saved");

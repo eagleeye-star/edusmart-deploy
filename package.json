@@ -1,7 +1,7 @@
 {
   "name": "edusmart-school-manager",
   "productName": "EduSmart School Manager",
-  "version": "6.2.9",
+  "version": "6.3.0",
   "description": "EduSmart School Manager for Ghanaian Basic Schools",
   "author": "Gilbert Oscar Prah",
   "main": "electron/main.js",
