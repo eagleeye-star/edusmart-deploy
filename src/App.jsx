@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "6.3.0";
+const APP_VERSION = "6.3.1";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 

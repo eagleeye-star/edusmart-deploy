@@ -335,7 +335,16 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
       const channel = supabaseClient
         .channel(`${table}-sync-${Math.random().toString(36).slice(2)}`)
         .on("postgres_changes", { event: "*", schema: "public", table }, (payload) => {
-          if (payload.new && Object.keys(payload.new).length > 0) onRow(payload.new);
+          // fetchAll() always runs a row through fromDbFields() before
+          // handing it to the app — this realtime path never did,
+          // meaning a change delivered live arrived as raw snake_case
+          // (student_id, not studentId) that the app's own state can't
+          // match against anything. For a record the receiving device
+          // has never seen before, this made the update effectively
+          // invisible until a full reload happened to re-fetch it
+          // correctly — which looked exactly like "it's taking forever"
+          // when the data had actually already arrived, just broken.
+          if (payload.new && Object.keys(payload.new).length > 0) onRow(fromDbFields(table, payload.new));
         })
         .subscribe();
       return () => supabaseClient.removeChannel(channel);
