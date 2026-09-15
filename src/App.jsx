@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "6.3.2";
+const APP_VERSION = "6.3.3";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -3935,6 +3935,7 @@ function Reports({ students,grades,attendance,fees,expenses,school,classes,subje
   const isTeacher = curUser?.role==="Teacher"; const myClass = isTeacher?curUser?.classAssigned:null;
   const [rt,setRt]=useState("student");
   const [sc,setSc]=useState(myClass||classes[5]); const [ss,setSs]=useState(""); const [st,setSt]=useState("Term 1");
+  const [bulkPrint,setBulkPrint]=useState(false);
 
   const classStu=students.filter(s=>s.status==="active"&&s.class===sc);
   const sg=(sid,term)=>grades.filter(g=>g.studentId===sid&&g.term===term);
@@ -3954,64 +3955,122 @@ function Reports({ students,grades,attendance,fees,expenses,school,classes,subje
       <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>📋 Reports</h2>
       {!isTeacher && <Tabs tabs={[{key:"student",label:"Student Report Card"},{key:"subject",label:"Subject Analysis"},{key:"school",label:"School Dashboard"}]} active={rt} onChange={setRt}/>}
 
-      {rt==="student"&&(
-        <div>
-          <div style={{ display:"flex",gap:8,marginBottom:14,flexWrap:"wrap" }}>
-            {isTeacher
-              ? <div style={{ padding:"8px 14px",background:"#dbeafe",borderRadius:8,fontSize:13,color:"#1d4ed8",fontWeight:600 }}>📌 {sc}</div>
-              : <select value={sc} onChange={e=>{setSc(e.target.value);setSs("");}} style={{ ...inp,width:160 }}>{classes.map(c=><option key={c}>{c}</option>)}</select>}
-            <select value={ss} onChange={e=>setSs(e.target.value)} style={{ ...inp,width:220 }}><option value="">Select student</option>{classStu.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select>
-            <select value={st} onChange={e=>setSt(e.target.value)} style={{ ...inp,width:120 }}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
-          </div>
-          {ss&&(()=>{
-            const stu=students.find(s=>s.id===ss); const sGrades=sg(ss,st); const av=avg(sGrades); const att=attRate(ss);
-            return (
-              <Card className="report-card-print" style={{ padding:28 }}>
-                <div style={{ textAlign:"center",marginBottom:16,borderBottom:"2px solid #1e40af",paddingBottom:14 }}>
-                  {school.logo && <img src={school.logo} alt="" style={{ width:56,height:56,objectFit:"contain",marginBottom:6 }}/>}
-                  <div style={{ fontSize:20,fontWeight:700,color:"#0f172a" }}>{school.name}</div>
-                  <div style={{ fontSize:12,color:"#64748b" }}>{school.address} | {school.phone}</div>
-                  <div style={{ fontSize:15,fontWeight:700,color:"#1e40af",marginTop:8 }}>ACADEMIC REPORT — {st} 2024/2025</div>
+      {rt==="student"&&(()=>{
+        // Extracted so the exact same report card layout can be used
+        // both for a single selected student and for printing every
+        // student in the class in one batch — one definition of what
+        // a report card looks like, used both ways.
+        const renderCardBody = (stu) => {
+          const sGrades=sg(stu.id,st); const av=avg(sGrades); const att=attRate(stu.id);
+          const classAverages = classStu.map(s=>({ id:s.id, avg:avg(sg(s.id,st)) })).filter(s=>s.avg>0);
+          const studentAvg = classAverages.find(s=>s.id===stu.id)?.avg;
+          const position = studentAvg!=null ? classAverages.filter(s=>s.avg>studentAvg).length+1 : null;
+          const totalRanked = classAverages.length;
+          return (
+            <>
+              <div style={{ textAlign:"center",marginBottom:16,borderBottom:"2px solid #1e40af",paddingBottom:14 }}>
+                {school.logo && <img src={school.logo} alt="" style={{ width:56,height:56,objectFit:"contain",marginBottom:6 }}/>}
+                <div style={{ fontSize:20,fontWeight:700,color:"#0f172a" }}>{school.name}</div>
+                <div style={{ fontSize:12,color:"#64748b" }}>{school.address} | {school.phone}</div>
+                <div style={{ fontSize:15,fontWeight:700,color:"#1e40af",marginTop:8 }}>ACADEMIC REPORT — {st} 2024/2025</div>
+              </div>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16,fontSize:13 }}>
+                <div><strong>Name:</strong> {stu?.name}</div><div><strong>Class:</strong> {stu?.class}</div>
+                <div><strong>Student ID:</strong> {stu?.id}</div>
+                <div><strong>Attendance:</strong> <span style={{ color:att>=80?"#16a34a":"#dc2626",fontWeight:700 }}>{att}%</span></div>
+                <div><strong>Class Position:</strong> {position!=null?`${position} of ${totalRanked}`:"Not yet ranked"}</div>
+              </div>
+              <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:16 }}>
+                <thead><tr style={{ background:"#1e40af" }}>
+                  {["Subject","CA (30)","Exam (70)","Total (100)","Grade","Remark"].map(h=><th key={h} style={{ padding:"8px 12px",textAlign:"left",fontWeight:600,color:"#fff" }}>{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {sGrades.length>0?sGrades.map(g=>(
+                    <tr key={g.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                      <td style={{ padding:"7px 12px" }}>{g.subject}</td>
+                      <td style={{ padding:"7px 12px" }}>{g.ca??"-"}</td>
+                      <td style={{ padding:"7px 12px" }}>{g.exam??"-"}</td>
+                      <td style={{ padding:"7px 12px",fontWeight:700 }}>{g.score}</td>
+                      <td style={{ padding:"7px 12px" }}><span style={{ fontWeight:700,color:gradeColor(g.grade) }}>{g.grade}</span></td>
+                      <td style={{ padding:"7px 12px",color:"#64748b",fontSize:11 }}>{g.score>=80?"Excellent":g.score>=70?"Very Good":g.score>=60?"Good":g.score>=50?"Average":"Needs Improvement"}</td>
+                    </tr>
+                  )):<tr><td colSpan={6} style={{ padding:20,textAlign:"center",color:"#9ca3af" }}>No grades for {st}</td></tr>}
+                </tbody>
+              </table>
+              {sGrades.length>0&&(
+                <div style={{ display:"flex",gap:16,padding:12,background:"#f0f9ff",borderRadius:8,marginBottom:16 }}>
+                  <div><span style={{ fontSize:12,color:"#0369a1" }}>Average: </span><strong>{av}%</strong></div>
+                  <div><span style={{ fontSize:12,color:"#0369a1" }}>Overall: </span><strong style={{ color:gradeColor(calcGrade(av)) }}>{calcGrade(av)}</strong></div>
+                  <div><span style={{ fontSize:12,color:"#0369a1" }}>Subjects: </span><strong>{sGrades.length}</strong></div>
                 </div>
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16,fontSize:13 }}>
-                  <div><strong>Name:</strong> {stu?.name}</div><div><strong>Class:</strong> {stu?.class}</div>
-                  <div><strong>Student ID:</strong> {stu?.id}</div>
-                  <div><strong>Attendance:</strong> <span style={{ color:att>=80?"#16a34a":"#dc2626",fontWeight:700 }}>{att}%</span></div>
-                </div>
-                <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:16 }}>
-                  <thead><tr style={{ background:"#1e40af" }}>
-                    {["Subject","CA (30)","Exam (70)","Total (100)","Grade","Remark"].map(h=><th key={h} style={{ padding:"8px 12px",textAlign:"left",fontWeight:600,color:"#fff" }}>{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {sGrades.length>0?sGrades.map(g=>(
-                      <tr key={g.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
-                        <td style={{ padding:"7px 12px" }}>{g.subject}</td>
-                        <td style={{ padding:"7px 12px" }}>{g.ca??"-"}</td>
-                        <td style={{ padding:"7px 12px" }}>{g.exam??"-"}</td>
-                        <td style={{ padding:"7px 12px",fontWeight:700 }}>{g.score}</td>
-                        <td style={{ padding:"7px 12px" }}><span style={{ fontWeight:700,color:gradeColor(g.grade) }}>{g.grade}</span></td>
-                        <td style={{ padding:"7px 12px",color:"#64748b",fontSize:11 }}>{g.score>=80?"Excellent":g.score>=70?"Very Good":g.score>=60?"Good":g.score>=50?"Average":"Needs Improvement"}</td>
-                      </tr>
-                    )):<tr><td colSpan={6} style={{ padding:20,textAlign:"center",color:"#9ca3af" }}>No grades for {st}</td></tr>}
-                  </tbody>
-                </table>
-                {sGrades.length>0&&(
-                  <div style={{ display:"flex",gap:16,padding:12,background:"#f0f9ff",borderRadius:8,marginBottom:16 }}>
-                    <div><span style={{ fontSize:12,color:"#0369a1" }}>Average: </span><strong>{av}%</strong></div>
-                    <div><span style={{ fontSize:12,color:"#0369a1" }}>Overall: </span><strong style={{ color:gradeColor(calcGrade(av)) }}>{calcGrade(av)}</strong></div>
-                    <div><span style={{ fontSize:12,color:"#0369a1" }}>Subjects: </span><strong>{sGrades.length}</strong></div>
-                  </div>
-                )}
+              )}
+              <div style={{ display:"flex",gap:8 }}>
+                <div style={{ flex:1,borderTop:"1px solid #e5e7eb",paddingTop:8,fontSize:12,color:"#64748b" }}>Class Teacher's Remarks: _______________</div>
+                <div style={{ flex:1,borderTop:"1px solid #e5e7eb",paddingTop:8,fontSize:12,color:"#64748b" }}>Head's Signature: _______________</div>
+              </div>
+            </>
+          );
+        };
+
+        return (<>
+          {bulkPrint ? (
+            <div>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+                <p style={{ fontSize:13,color:"#64748b",margin:0 }}>{classStu.length} report card(s) for {sc} — {st}. Each prints on its own page.</p>
                 <div style={{ display:"flex",gap:8 }}>
-                  <div style={{ flex:1,borderTop:"1px solid #e5e7eb",paddingTop:8,fontSize:12,color:"#64748b" }}>Class Teacher's Remarks: _______________</div>
-                  <div style={{ flex:1,borderTop:"1px solid #e5e7eb",paddingTop:8,fontSize:12,color:"#64748b" }}>Head's Signature: _______________</div>
+                  <button onClick={()=>setBulkPrint(false)} style={{ ...btnS }}>← Back to Single</button>
+                  <button onClick={()=>{
+                    const prevTitle = document.title;
+                    document.title = `${school.name} — ${sc} Report Cards`;
+                    window.print();
+                    setTimeout(()=>{ document.title = prevTitle; }, 500);
+                  }} style={{ ...btnP }}>🖨️ Print All {classStu.length}</button>
                 </div>
-                <button onClick={()=>window.print()} style={{ ...btnP,marginTop:16 }}>🖨️ Print Report Card</button>
-              </Card>
-            );
-          })()}
-        </div>
-      )}
+              </div>
+              {classStu.map((stu,idx)=>(
+                <Card key={stu.id} className="report-card-print" style={{ padding:28,marginBottom:16,pageBreakAfter:idx<classStu.length-1?"always":"auto" }}>
+                  {renderCardBody(stu)}
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <div>
+              <div style={{ display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",justifyContent:"space-between" }}>
+                <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+                  {isTeacher
+                    ? <div style={{ padding:"8px 14px",background:"#dbeafe",borderRadius:8,fontSize:13,color:"#1d4ed8",fontWeight:600 }}>📌 {sc}</div>
+                    : <select value={sc} onChange={e=>{setSc(e.target.value);setSs("");}} style={{ ...inp,width:160 }}>{classes.map(c=><option key={c}>{c}</option>)}</select>}
+                  <select value={ss} onChange={e=>setSs(e.target.value)} style={{ ...inp,width:220 }}><option value="">Select student</option>{classStu.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select>
+                  <select value={st} onChange={e=>setSt(e.target.value)} style={{ ...inp,width:120 }}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
+                </div>
+                {classStu.length>0 && <button onClick={()=>setBulkPrint(true)} style={{ ...btnS,whiteSpace:"nowrap" }}>🖨️ Print All {classStu.length} in {sc}</button>}
+              </div>
+              {classStu.length===0 && (
+                <div style={{ padding:24,textAlign:"center",color:"#9ca3af",background:"#f8fafc",borderRadius:10 }}>
+                  No active students found in <strong>{sc}</strong>. Check Students to confirm students are assigned to this class.
+                </div>
+              )}
+              {ss&&(()=>{
+                const stu=students.find(s=>s.id===ss);
+                return (
+                  <Card className="report-card-print" style={{ padding:28 }}>
+                    {renderCardBody(stu)}
+                    <button onClick={()=>{
+                      const prevTitle = document.title;
+                      document.title = `${school.name} — ${stu?.name} Report Card`;
+                      window.print();
+                      setTimeout(()=>{ document.title = prevTitle; }, 500);
+                    }} style={{ ...btnP,marginTop:16 }}>🖨️ Print Report Card</button>
+                    <p style={{ fontSize:11,color:"#94a3b8",marginTop:8 }}>
+                      For a fully clean printout with no browser header or footer at all, look for "More settings" in the print dialog and turn off "Headers and footers" — this is a browser setting, not something the app can turn off automatically.
+                    </p>
+                  </Card>
+                );
+              })()}
+            </div>
+          )}
+        </>);
+      })()}
 
       {rt==="subject"&&(
         <div>
