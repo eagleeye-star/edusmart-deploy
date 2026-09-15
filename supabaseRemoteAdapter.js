@@ -49,6 +49,12 @@ const FIELD_MAPS = {
   books:      {},
   borrows:    { bookId: "book_id", borrowerId: "borrower_id", borrowerType: "borrower_type",
                 borrowDate: "borrow_date", dueDate: "due_date", returnDate: "return_date", enteredBy: "entered_by" },
+  mock_exams:    { studentId: "student_id", examType: "exam_type", enteredBy: "entered_by" },
+  expenses:      { enteredBy: "entered_by" },
+  exam_schedule: { startTime: "start_time", endTime: "end_time", createdBy: "created_by" },
+  nursery_logs:  { studentId: "student_id", napStart: "nap_start", napEnd: "nap_end",
+                   feedingTimes: "feeding_times", feedingNotes: "feeding_notes", enteredBy: "entered_by" },
+  milestones:    { studentId: "student_id", enteredBy: "entered_by" },
 };
 
 function toDbFields(table, obj) {
@@ -156,7 +162,8 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
         name: data.name, address: data.address, phone: data.phone, email: data.email,
         motto: data.motto, currentTerm: data.current_term, currentYear: data.current_year,
         principalName: data.principal_name, logo: data.logo_url, termStartDate: data.term_start_date,
-        timetablesJson: data.timetables_json,
+        timetablesJson: data.timetables_json, classesConfigJson: data.classes_config_json,
+        yearArchiveJson: data.year_archive_json,
       };
     },
 
@@ -165,13 +172,33 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
     // setup, so a device joining later via Connect Code sees accurate
     // information instead of blank fields.
     async updateSchoolInfo(schoolId, schoolInfo) {
-      const { error } = await supabaseClient.from("schools").update({
-        address: schoolInfo.address, phone: schoolInfo.phone, email: schoolInfo.email,
+      const patch = {
+        name: schoolInfo.name, address: schoolInfo.address, phone: schoolInfo.phone, email: schoolInfo.email,
         motto: schoolInfo.motto, current_term: schoolInfo.currentTerm, current_year: schoolInfo.currentYear,
         principal_name: schoolInfo.principalName, logo_url: schoolInfo.logo, term_start_date: schoolInfo.termStartDate,
         timetables_json: schoolInfo.timetablesJson,
-      }).eq("id", schoolId);
+      };
+      // Only overwrite classes_config_json when it's actually part of
+      // this call — the general School Profile push (name/address/
+      // etc.) fires on every profile change and must NOT accidentally
+      // wipe classes/subjects with undefined just because this
+      // particular call wasn't about them.
+      if (schoolInfo.classesConfigJson !== undefined) patch.classes_config_json = schoolInfo.classesConfigJson;
+      if (schoolInfo.yearArchiveJson !== undefined) patch.year_archive_json = schoolInfo.yearArchiveJson;
+      // .select() here is deliberate, not decorative: an UPDATE whose
+      // WHERE clause matches zero rows (a wrong/stale schoolId, or a
+      // row RLS silently filters out) returns success with NO error
+      // at all — PostgREST doesn't treat "changed nothing" as a
+      // failure. Without asking for the row back, that failure mode
+      // is invisible. If data comes back empty, nothing was actually
+      // written, and the caller needs to know that same as any other
+      // failure — found this gap while directly investigating why a
+      // profile update might silently not take effect.
+      const { data, error } = await supabaseClient.from("schools").update(patch).eq("id", schoolId).select();
       if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error(`Update matched no school row for id ${schoolId} — the row may not exist, or access was denied.`);
+      }
     },
 
     // Renewing on one device pushes the new licence here; every other
@@ -308,7 +335,16 @@ export function createSupabaseRemoteAdapter(supabaseClient) {
       const channel = supabaseClient
         .channel(`${table}-sync-${Math.random().toString(36).slice(2)}`)
         .on("postgres_changes", { event: "*", schema: "public", table }, (payload) => {
-          if (payload.new && Object.keys(payload.new).length > 0) onRow(payload.new);
+          // fetchAll() always runs a row through fromDbFields() before
+          // handing it to the app — this realtime path never did,
+          // meaning a change delivered live arrived as raw snake_case
+          // (student_id, not studentId) that the app's own state can't
+          // match against anything. For a record the receiving device
+          // has never seen before, this made the update effectively
+          // invisible until a full reload happened to re-fetch it
+          // correctly — which looked exactly like "it's taking forever"
+          // when the data had actually already arrived, just broken.
+          if (payload.new && Object.keys(payload.new).length > 0) onRow(fromDbFields(table, payload.new));
         })
         .subscribe();
       return () => supabaseClient.removeChannel(channel);

@@ -10,7 +10,7 @@ import { useCloudSync } from "./sync/useCloudSync.js";
 // Single source of truth for the version shown throughout the app —
 // keep this in sync with package.json's version each release, since
 // nothing wires them together automatically at build time.
-const APP_VERSION = "6.1.1";
+const APP_VERSION = "6.3.3";
 
 const LICENCE_SECRET = "EAGLEEYE-EDUSMART-2026-LIC";
 
@@ -62,9 +62,9 @@ const ROLE_ACCESS = {
   "Admin":                ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","kindergarten","exams","promotion","history"],
   "Headmaster":           ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","kindergarten","exams","promotion","history"],
   "HOD":                  ["dashboard","students","staff","grades","attendance","finance","library","timetable","reports","idcards","archive","audit","settings","payroll","communication","nursery","kindergarten","exams","promotion","history"],
-  "Teacher":              ["dashboard","grades","attendance","timetable","exams","communication"],
-  "Account Office":       ["finance","payroll"],
-  "Librarian":            ["library"],
+  "Teacher":              ["dashboard","grades","attendance","timetable","exams","communication","reports"],
+  "Account Office":       ["dashboard","finance","payroll"],
+  "Librarian":            ["dashboard","library"],
   "Non-Teaching Staff":   ["dashboard"],
 };
 
@@ -490,6 +490,12 @@ export default function EduSmart() {
   const [loggingIn, setLoggingIn] = useState(false);
   const [recoveryKey, setRecoveryKey] = useState("");
   const [section,   setSection]   = useState("dashboard");
+  // For the sidebar "Sync Now" — previously only reachable via
+  // Settings → Cloud Sync, which Teachers (and other non-admin roles)
+  // don't have access to at all. If something genuinely gets stuck,
+  // they had no way to even attempt a fix or see why, unlike Admin.
+  const [sidebarSyncBusy,setSidebarSyncBusy]=useState(false);
+  const [showStuckDetails,setShowStuckDetails]=useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [quickQuery, setQuickQuery] = useState("");
   const [jumpSearch, setJumpSearch] = useState("");
@@ -526,8 +532,8 @@ export default function EduSmart() {
   // here so useCloudSync's internals can stay consistently keyed by
   // table name throughout.
   const cloudSync = useCloudSync({
-    appState: { students, attendance, grades, fees, staff: users, school, fee_types: feeTypes, payroll, books, borrows },
-    appSetters: { students: setStudents, attendance: setAttendance, grades: setGrades, fees: setFees, staff: setUsers, school: setSchool, fee_types: setFeeTypes, payroll: setPayroll, books: setBooks, borrows: setBorrows, timetables: setTimetables },
+    appState: { students, attendance, grades, fees, staff: users, school, fee_types: feeTypes, payroll, books, borrows, mock_exams: mockExams, expenses, exam_schedule: examSchedule, nursery_logs: nurseryLogs, milestones },
+    appSetters: { students: setStudents, attendance: setAttendance, grades: setGrades, fees: setFees, staff: setUsers, school: setSchool, fee_types: setFeeTypes, payroll: setPayroll, books: setBooks, borrows: setBorrows, timetables: setTimetables, classes: setClasses, classLevels: setClassLevels, subjects: setSubjects, mock_exams: setMockExams, expenses: setExpenses, exam_schedule: setExamSchedule, nursery_logs: setNurseryLogs, milestones: setMilestones, yearArchive: setYearArchive },
   });
 
   // The exact same data shape as a manual export (Settings → Data &
@@ -606,7 +612,7 @@ export default function EduSmart() {
     if (!cloudSync?.enabled) return;
     if (timetablesPushTimer.current) clearTimeout(timetablesPushTimer.current);
     timetablesPushTimer.current = setTimeout(() => {
-      cloudSync.pushTimetablesToCloud(timetables);
+      cloudSync.pushTimetablesToCloud(timetables).then(r => { if (!r.success) notify(`Timetable didn't sync: ${r.error}`, "error"); });
     }, 1000);
     return () => { if (timetablesPushTimer.current) clearTimeout(timetablesPushTimer.current); };
   }, [timetables, cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -623,10 +629,46 @@ export default function EduSmart() {
     if (!cloudSync?.enabled) return;
     if (schoolPushTimer.current) clearTimeout(schoolPushTimer.current);
     schoolPushTimer.current = setTimeout(() => {
-      cloudSync.pushSchoolProfileToCloud(school);
+      // This used to fail silently on every save if a column was
+      // ever missing — now any real failure shows up right where the
+      // edit was made, instead of only being discoverable by
+      // comparing two devices days later.
+      cloudSync.pushSchoolProfileToCloud(school).then(r => { if (!r.success) notify(`School Profile didn't sync: ${r.error}`, "error"); });
     }, 1000);
     return () => { if (schoolPushTimer.current) clearTimeout(schoolPushTimer.current); };
   }, [school, cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Classes & Subjects push — the second half of this same fix.
+  // Found this proactively while investigating a report that School
+  // Profile syncing "still wasn't working" after the first patch —
+  // turned out to be this: Settings → Classes & Subjects had no sync
+  // mechanism at all, a separate instance of the identical gap.
+  const classesConfigPushTimer = useRef(null);
+  useEffect(() => {
+    if (!cloudSync?.enabled) return;
+    if (classesConfigPushTimer.current) clearTimeout(classesConfigPushTimer.current);
+    classesConfigPushTimer.current = setTimeout(() => {
+      cloudSync.pushClassesConfigToCloud({ classes, classLevels, subjects }).then(r => { if (!r.success) notify(`Classes & Subjects didn't sync: ${r.error}`, "error"); });
+    }, 1000);
+    return () => { if (classesConfigPushTimer.current) clearTimeout(classesConfigPushTimer.current); };
+  }, [classes, classLevels, subjects, cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Year Archive push — from the deep bug hunt: Promotion writes a
+  // full year-end snapshot here, and it had zero sync coverage.
+  // Debounced push as a safety net for any change; Promotion ALSO
+  // pushes explicitly right after writing (see Promotion component),
+  // the same lesson learned from the confirmRestore gap — a
+  // significant one-time bulk event shouldn't rely solely on a
+  // passive debounce to reach the cloud.
+  const yearArchivePushTimer = useRef(null);
+  useEffect(() => {
+    if (!cloudSync?.enabled) return;
+    if (yearArchivePushTimer.current) clearTimeout(yearArchivePushTimer.current);
+    yearArchivePushTimer.current = setTimeout(() => {
+      cloudSync.pushYearArchiveToCloud(yearArchive).then(r => { if (!r.success) notify(`Year Archive didn't sync: ${r.error}`, "error"); });
+    }, 1000);
+    return () => { if (yearArchivePushTimer.current) clearTimeout(yearArchivePushTimer.current); };
+  }, [yearArchive, cloudSync?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Automatic backups — checks once on launch and every few hours
   // afterward whether one is actually due, based on the school's own
@@ -962,12 +1004,48 @@ export default function EduSmart() {
             <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:8,fontSize:11 }}>
               <span style={{
                 width:8,height:8,borderRadius:"50%",display:"inline-block",
-                background:cloudSync.status.phase==="online"?"#22c55e":cloudSync.status.phase==="offline"?"#ef4444":"#f59e0b",
+                background:cloudSync.status.phase==="online"?(cloudSync.status.pending>0?"#f59e0b":"#22c55e"):cloudSync.status.phase==="offline"?"#ef4444":"#f59e0b",
               }}/>
               <span style={{ color:"#94a3b8" }}>
-                {cloudSync.status.phase==="online"?"Synced":cloudSync.status.phase==="offline"?"Offline":"Connecting"}
+                {/* "Synced" previously meant only "the connection is
+                    reachable," even with records still waiting to go
+                    through — showing "Synced · 1 pending" in the same
+                    breath read as a contradiction. Now it only says
+                    Synced once nothing is actually waiting. */}
+                {cloudSync.status.phase==="offline"?"Offline":cloudSync.status.phase==="connecting"?"Connecting":cloudSync.status.pending>0?"Syncing":"Synced"}
                 {cloudSync.status.pending>0?` · ${cloudSync.status.pending} pending`:""}
               </span>
+            </div>
+          )}
+          {cloudSync?.enabled && (
+            <div style={{ marginBottom:8 }}>
+              <button
+                onClick={async()=>{
+                  setSidebarSyncBusy(true);
+                  await cloudSync.syncNow();
+                  setSidebarSyncBusy(false);
+                }}
+                disabled={sidebarSyncBusy}
+                style={{ width:"100%",fontSize:11,padding:"5px 8px",borderRadius:6,border:"1px solid #334155",background:"#1e293b",color:"#cbd5e1",cursor:sidebarSyncBusy?"default":"pointer" }}>
+                {sidebarSyncBusy?"Syncing...":"🔄 Sync Now"}
+              </button>
+              {cloudSync.status.stuck?.length>0 && (
+                <>
+                  <button onClick={()=>setShowStuckDetails(p=>!p)} style={{ width:"100%",fontSize:10,padding:"4px 8px",marginTop:4,borderRadius:6,border:"1px solid #7c2d12",background:"#431407",color:"#fdba74",cursor:"pointer" }}>
+                    ⚠️ {cloudSync.status.stuck.length} record(s) not syncing — {showStuckDetails?"hide":"why?"}
+                  </button>
+                  {showStuckDetails && (
+                    <div style={{ maxHeight:140,overflowY:"auto",background:"#1e293b",borderRadius:6,padding:6,marginTop:4 }}>
+                      {cloudSync.status.stuck.map((e,i)=>(
+                        <div key={i} style={{ fontSize:9,color:"#cbd5e1",padding:"3px 0",borderBottom:i<cloudSync.status.stuck.length-1?"1px solid #334155":"none" }}>
+                          <strong>{e.table}</strong>{e.name?` (${e.name})`:""} — tried {e.attempts}×<br/>
+                          <span style={{ color:"#fca5a5" }}>{e.lastError||"Unknown error"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
           <div style={{ fontSize:12,color:"#94a3b8",marginBottom:2 }}>{curUser?.name}</div>
@@ -1198,6 +1276,25 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
     return <TeacherDashboard school={school} students={students} grades={grades} attendance={attendance}
       examSchedule={examSchedule} mockExams={mockExams} curUser={curUser}/>;
   }
+  if (curUser?.role === "Non-Teaching Staff") {
+    return <StaffDashboard school={school} students={students} users={users} curUser={curUser}/>;
+  }
+  // Admin/Headmaster/HOD are the only roles meant to see the whole
+  // school at once — everyone else should only see alerts and stats
+  // for their own actual domain. Previously every one of these
+  // widgets showed unconditionally to any non-Teacher role, meaning
+  // a Librarian saw fee arrears and an Account Office person saw
+  // overdue library books — neither is their concern, and neither
+  // should be visible to them.
+  const role = curUser?.role;
+  const isHigherAuthority = role==="Admin"||role==="Headmaster"||role==="HOD";
+  const canSeeFinance = isHigherAuthority || role==="Account Office";
+  const canSeeLibrary = isHigherAuthority || role==="Librarian";
+  // General school-wide figures (enrollment, staff count, attendance,
+  // class performance) stay with the higher-authority tier only —
+  // Account Office and Librarian get just their own domain, not the
+  // whole school's overview alongside it.
+  const canSeeGeneral = isHigherAuthority;
   const active = students.filter(s=>s.status==="active");
   const totalPaid = fees.reduce((a,f)=>a+f.paid,0);
   const totalExp  = expenses.reduce((a,e)=>a+e.amount,0);
@@ -1214,7 +1311,7 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
         <p style={{ color:"#64748b",margin:"4px 0 0",fontSize:13 }}>{school.name} · {school.currentTerm} {school.currentYear}</p>
       </div>
 
-      {smsBalanceInfo?.estimatedBalance!=null && smsBalanceInfo.estimatedBalance<LOW_BALANCE_THRESHOLD && (
+      {isHigherAuthority && smsBalanceInfo?.estimatedBalance!=null && smsBalanceInfo.estimatedBalance<LOW_BALANCE_THRESHOLD && (
         <div style={{ background:"#fef3c7",border:"1px solid #fcd34d",borderRadius:10,padding:"12px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:10 }}>
           <span style={{ fontSize:18 }}>📱</span>
           <div style={{ fontSize:13,color:"#92400e" }}>
@@ -1224,19 +1321,19 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
       )}
 
       {/* ALERTS */}
-      {(absentAlerts.length>0||overdueBooks.length>0||noStock.length>0)&&(
+      {((canSeeGeneral&&absentAlerts.length>0)||(canSeeLibrary&&(overdueBooks.length>0||noStock.length>0)))&&(
         <div style={{ marginBottom:20 }}>
-          {absentAlerts.map(s=>(
+          {canSeeGeneral&&absentAlerts.map(s=>(
             <div key={s.id} style={{ background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,padding:"10px 16px",marginBottom:8,fontSize:13,color:"#9a3412" }}>
               ⚠️ <strong>{s.name}</strong> ({s.class}) has been absent 3+ consecutive days
             </div>
           ))}
-          {overdueBooks.map(b=>{ const bk=books?.find(x=>x.id===b.bookId); return (
+          {canSeeLibrary&&overdueBooks.map(b=>{ const bk=books?.find(x=>x.id===b.bookId); return (
             <div key={b.id} style={{ background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:"10px 16px",marginBottom:8,fontSize:13,color:"#991b1b" }}>
               📚 Overdue: <strong>{bk?.title}</strong> — due {b.dueDate}
             </div>
           );})}
-          {noStock.map(b=>(
+          {canSeeLibrary&&noStock.map(b=>(
             <div key={b.id} style={{ background:"#fef9c3",border:"1px solid #fde047",borderRadius:10,padding:"10px 16px",marginBottom:8,fontSize:13,color:"#713f12" }}>
               📦 Out of stock: <strong>{b.title}</strong> (0 copies available)
             </div>
@@ -1245,18 +1342,19 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
       )}
 
       <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:12,marginBottom:24 }}>
-        <StatCard icon="🎒" label="Active Students"  value={active.length}              color="#3b82f6"/>
-        <StatCard icon="👥" label="Active Staff"     value={users.filter(u=>u.active).length} color="#8b5cf6"/>
-        <StatCard icon="💰" label="Fees Collected"   value={formatGHS(totalPaid)}        color="#10b981"/>
-        <StatCard icon="📤" label="Total Expenses"   value={formatGHS(totalExp)}          color="#f59e0b"/>
-        <StatCard icon="🏦" label="Net Balance"      value={formatGHS(totalPaid-totalExp)} color={(totalPaid-totalExp)>=0?"#0369a1":"#dc2626"}/>
-        <StatCard icon="✅" label="Present Today"    value={`${present}/${active.length}`} color="#0ea5e9"/>
-        <StatCard icon="⚠️" label="Fee Arrears"      value={feeAlerts.length}             color="#ef4444" sub="students with balance"/>
-        <StatCard icon="📚" label="Overdue Books"    value={overdueBooks.length}          color="#dc2626"/>
+        {canSeeGeneral&&<StatCard icon="🎒" label="Active Students"  value={active.length}              color="#3b82f6"/>}
+        {canSeeGeneral&&<StatCard icon="👥" label="Active Staff"     value={users.filter(u=>u.active).length} color="#8b5cf6"/>}
+        {canSeeFinance&&<StatCard icon="💰" label="Fees Collected"   value={formatGHS(totalPaid)}        color="#10b981"/>}
+        {canSeeFinance&&<StatCard icon="📤" label="Total Expenses"   value={formatGHS(totalExp)}          color="#f59e0b"/>}
+        {canSeeFinance&&<StatCard icon="🏦" label="Net Balance"      value={formatGHS(totalPaid-totalExp)} color={(totalPaid-totalExp)>=0?"#0369a1":"#dc2626"}/>}
+        {canSeeGeneral&&<StatCard icon="✅" label="Present Today"    value={`${present}/${active.length}`} color="#0ea5e9"/>}
+        {canSeeFinance&&<StatCard icon="⚠️" label="Fee Arrears"      value={feeAlerts.length}             color="#ef4444" sub="students with balance"/>}
+        {canSeeLibrary&&<StatCard icon="📚" label="Overdue Books"    value={overdueBooks.length}          color="#dc2626"/>}
       </div>
 
-      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16 }}>
-        <Card style={{ padding:18 }}>
+      {(canSeeGeneral||canSeeFinance)&&(
+      <div style={{ display:"grid",gridTemplateColumns:canSeeGeneral&&canSeeFinance?"1fr 1fr":"1fr",gap:16,marginBottom:16 }}>
+        {canSeeGeneral&&<Card style={{ padding:18 }}>
           <h3 style={{ margin:"0 0 12px",fontSize:15,color:"#0f172a" }}>📊 Class Performance</h3>
           {Object.entries(classPerf).slice(0,6).map(([cls,scores])=>{
             const avg=Math.round(scores.reduce((a,b)=>a+b,0)/scores.length);
@@ -1272,8 +1370,8 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
             );
           })}
           {bestClass&&<p style={{ margin:"10px 0 0",fontSize:12,color:"#0369a1" }}>🏆 Best: <strong>{bestClass[0]}</strong> ({Math.round(bestClass[1].reduce((a,b)=>a+b,0)/bestClass[1].length)}% avg)</p>}
-        </Card>
-        <Card style={{ padding:18 }}>
+        </Card>}
+        {canSeeFinance&&<Card style={{ padding:18 }}>
           <h3 style={{ margin:"0 0 12px",fontSize:15,color:"#0f172a" }}>💸 Fee Arrears</h3>
           {feeAlerts.slice(0,6).map(s=>{
             const balances = computeStudentFeeBalances(s, (feeTypes||[]).filter(ft=>ft.active), fees, school.termStartDate);
@@ -1293,8 +1391,9 @@ function Dashboard({ school,students,fees,expenses,attendance,grades,books,borro
             </div>
           );})}
           {feeAlerts.length===0&&<p style={{ color:"#16a34a",fontSize:13 }}>✅ All fees cleared!</p>}
-        </Card>
+        </Card>}
       </div>
+      )}
     </div>
   );
 }
@@ -1404,6 +1503,45 @@ function TeacherDashboard({ school,students,grades,attendance,examSchedule,mockE
   );
 }
 
+// ─── NON-TEACHING STAFF DASHBOARD ──────────────────────────────
+// A friendly, genuinely neutral landing page for staff with no
+// specific domain (security, cleaning, driving, catering, etc.) —
+// no financial figures, no attendance specifics, no student records,
+// just the general shape of the school and a warm welcome. Previously
+// this role saw an almost entirely blank page, since every widget on
+// the main Dashboard is correctly gated to a role's own domain and
+// this role doesn't have one.
+function StaffDashboard({ school,students,users,curUser }) {
+  const activeStudents = students.filter(s=>s.status==="active").length;
+  const activeStaff = users.filter(u=>u.active).length;
+  const today = new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+
+  return (
+    <div>
+      <div style={{ marginBottom:24 }}>
+        <h2 style={{ fontSize:22,fontWeight:700,color:"#0f172a",margin:0 }}>Good day, {curUser?.name?.split(" ")[0]} 👋</h2>
+        <p style={{ color:"#64748b",margin:"4px 0 0",fontSize:13 }}>{school.name} · {school.currentTerm} {school.currentYear}</p>
+      </div>
+
+      <Card style={{ padding:24,marginBottom:20,textAlign:"center",background:"#f0f9ff" }}>
+        <div style={{ fontSize:32,marginBottom:8 }}>📅</div>
+        <div style={{ fontSize:16,fontWeight:600,color:"#0f172a" }}>{today}</div>
+      </Card>
+
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:12,marginBottom:20 }}>
+        <StatCard icon="🎒" label="Students Enrolled" value={activeStudents} color="#3b82f6"/>
+        <StatCard icon="👥" label="Staff at School" value={activeStaff} color="#8b5cf6"/>
+      </div>
+
+      <Card style={{ padding:18 }}>
+        <h3 style={{ margin:"0 0 10px",fontSize:15,color:"#0f172a" }}>ℹ️ School Contact</h3>
+        <p style={{ margin:"0 0 4px",fontSize:13,color:"#374151" }}>{school.address}</p>
+        <p style={{ margin:"0 0 4px",fontSize:13,color:"#374151" }}>📞 {school.phone}</p>
+        <p style={{ margin:0,fontSize:13,color:"#374151" }}>✉️ {school.email}</p>
+      </Card>
+    </div>
+  );
+}
 
 function Students({ students,setStudents,notify,addAudit,curUser,classes,classLevels,initialSearch,cloudSync,feeTypes }) {
   const [search,setSearch]=useState(initialSearch||""); const [fc,setFc]=useState(""); const [fs,setFs]=useState("all");
@@ -1504,7 +1642,7 @@ function Students({ students,setStudents,notify,addAudit,curUser,classes,classLe
             </td>
             <td style={{ padding:"8px 12px",display:"flex",gap:4 }}>
               <button onClick={()=>{setEditId(s.id);setForm({name:s.name,class:s.class,dob:s.dob||"",gender:s.gender,guardian:s.guardian,phone:s.phone,fees:s.fees,paid:s.paid,status:s.status,photo:s.photo||"",feeExemptions:s.feeExemptions||[]});setShowForm(true);}} style={{ ...btnSm,background:"#dbeafe",color:"#1d4ed8" }}>Edit</button>
-              {s.status==="active"&&<button onClick={()=>{if(confirm(`Mark ${s.name} as dropout?`)){setStudents(p=>p.map(x=>x.id===s.id?{...x,status:"dropout"}:x));addAudit(`Dropout: ${s.name}`,"Students");notify("Moved to archive");}}} style={{ ...btnSm,background:"#fee2e2",color:"#991b1b" }}>Dropout</button>}
+              {s.status==="active"&&<button onClick={()=>{if(confirm(`Mark ${s.name} as dropout?`)){const updated={...s,status:"dropout"};setStudents(p=>p.map(x=>x.id===s.id?updated:x));cloudSync?.writeThrough("students",updated);addAudit(`Dropout: ${s.name}`,"Students");notify("Moved to archive");}}} style={{ ...btnSm,background:"#fee2e2",color:"#991b1b" }}>Dropout</button>}
             </td>
           </tr>
         ))} emptyMsg="No students found."/>
@@ -1514,7 +1652,7 @@ function Students({ students,setStudents,notify,addAudit,curUser,classes,classLe
 }
 
 // ─── NURSERY / KG ────────────────────────────────────────────
-function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,curUser,notify,addAudit,classLevels,levelFilter,pageTitle,pageIcon,school }) {
+function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,curUser,notify,addAudit,classLevels,levelFilter,pageTitle,pageIcon,school,cloudSync }) {
   const [tab,setTab]=useState("daily");
   const [selStu,setSelStu]=useState("");
   const [selDate,setSelDate]=useState(todayStr());
@@ -1536,16 +1674,20 @@ function Nursery({ students,nurseryLogs,setNurseryLogs,milestones,setMilestones,
 
   const saveLog = () => {
     const existing = nurseryLogs.find(l=>l.studentId===selStu&&l.date===selDate);
-    if(existing){ setNurseryLogs(p=>p.map(l=>l.id===existing.id?{...l,...logForm,enteredBy:curUser.code}:l)); }
-    else { setNurseryLogs(p=>[...p,{id:uid("NRS"),studentId:selStu,date:selDate,...logForm,enteredBy:curUser.code}]); }
+    let updated;
+    if(existing){ updated={...existing,...logForm,enteredBy:curUser.code}; setNurseryLogs(p=>p.map(l=>l.id===existing.id?updated:l)); }
+    else { updated={id:uid("NRS"),studentId:selStu,date:selDate,...logForm,enteredBy:curUser.code}; setNurseryLogs(p=>[...p,updated]); }
+    cloudSync?.writeThrough("nursery_logs", updated);
     addAudit(`Daily log: ${selStudent?.name} ${selDate}`,"Nursery"); notify("Log saved"); setShowLog(false); setLogForm(blank);
   };
 
   const saveMilestone = () => {
     if(!msForm.milestone){ notify("Select milestone","error"); return; }
     const existing = milestones.find(m=>m.studentId===selStu&&m.milestone===msForm.milestone&&m.term===selTerm);
-    if(existing){ setMilestones(p=>p.map(m=>m.id===existing.id?{...m,rating:msForm.rating,enteredBy:curUser.code,date:todayStr()}:m)); }
-    else { setMilestones(p=>[...p,{id:uid("MLS"),studentId:selStu,term:selTerm,year:"2024/2025",...msForm,enteredBy:curUser.code,date:todayStr()}]); }
+    let updated;
+    if(existing){ updated={...existing,rating:msForm.rating,enteredBy:curUser.code,date:todayStr()}; setMilestones(p=>p.map(m=>m.id===existing.id?updated:m)); }
+    else { updated={id:uid("MLS"),studentId:selStu,term:selTerm,year:"2024/2025",...msForm,enteredBy:curUser.code,date:todayStr()}; setMilestones(p=>[...p,updated]); }
+    cloudSync?.writeThrough("milestones", updated);
     addAudit(`Milestone: ${selStudent?.name}`,"Nursery"); notify("Milestone saved"); setShowMilestone(false);
   };
 
@@ -1810,14 +1952,28 @@ function Grades({ grades,setGrades,students,curUser,notify,addAudit,classes,subj
     if(!form.studentId||!form.subject||form.ca===""||form.exam===""){ notify("All fields required","error"); return; }
     if(+form.ca<0||+form.ca>30){ notify("CA must be 0–30","error"); return; }
     if(+form.exam<0||+form.exam>70){ notify("Exam must be 0–70","error"); return; }
+    // A student can only have ONE grade per subject per term/year —
+    // without this check, nothing stopped a second entry from being
+    // created instead of editing the first, leaving two conflicting
+    // scores for the same subject with no clear "correct" one.
+    if(!editId){
+      const dup = grades.find(g=>g.studentId===form.studentId&&g.subject===form.subject&&g.term===form.term&&g.year===form.year);
+      if(dup){ notify(`A grade already exists for this student in ${form.subject} (${form.term}, ${form.year}) — edit that one instead of adding a new one.`,"error"); return; }
+    }
     const score=totalScore(form.ca,form.exam); const grade=calcGrade(score);
+    // class was never actually being set on a grade record at all —
+    // this is the exact cause of "null value in column class violates
+    // not-null constraint" that was silently blocking every grade
+    // from syncing. Filling it in from the student's own record here,
+    // going forward.
+    const studentClass = students.find(s=>s.id===form.studentId)?.class || "";
     if(editId){
-      const updated = {...grades.find(g=>g.id===editId),...form,ca:+form.ca,exam:+form.exam,score,grade,enteredBy:curUser.code,date:todayStr()};
+      const updated = {...grades.find(g=>g.id===editId),...form,class:studentClass,ca:+form.ca,exam:+form.exam,score,grade,enteredBy:curUser.code,date:todayStr()};
       setGrades(p=>p.map(g=>g.id===editId?updated:g));
       cloudSync?.writeThrough("grades", updated);
       addAudit(`Edited grade`,"Grades"); notify("Grade updated");
     } else {
-      const newGrade = {id:uid("GRD"),...form,ca:+form.ca,exam:+form.exam,score,grade,enteredBy:curUser.code,date:todayStr()};
+      const newGrade = {id:uid("GRD"),...form,class:studentClass,ca:+form.ca,exam:+form.exam,score,grade,enteredBy:curUser.code,date:todayStr()};
       setGrades(p=>[...p,newGrade]);
       cloudSync?.writeThrough("grades", newGrade);
       addAudit(`Grade entered: ${form.subject}`,"Grades"); notify("Grade saved");
@@ -1888,32 +2044,49 @@ function Grades({ grades,setGrades,students,curUser,notify,addAudit,classes,subj
 }
 
 // ─── EXAMS ───────────────────────────────────────────────────
-function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,curUser,notify,addAudit,classes,subjects }) {
+function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,curUser,notify,addAudit,classes,subjects,cloudSync }) {
+  const isTeacher=curUser?.role==="Teacher"; const myClass=isTeacher?curUser?.classAssigned:null;
   const [tab,setTab]=useState("schedule");
   const [showSched,setShowSched]=useState(false); const [showMock,setShowMock]=useState(false);
-  const schedBlank={ class:"JHS 3",subject:getExamSubjects(subjects)[0],date:"",startTime:"08:00",endTime:"10:00",venue:"Main Hall" };
+  const schedBlank={ class:myClass||"JHS 3",subject:getExamSubjects(subjects)[0],date:"",startTime:"08:00",endTime:"10:00",venue:"Main Hall" };
   const mockBlank={ studentId:"",subject:getExamSubjects(subjects)[0],score:"",examType:"Mock 1",term:"Term 2",year:"2024/2025" };
   const [sf,setSf]=useState(schedBlank); const [mf,setMf]=useState(mockBlank);
 
+  // A teacher only ever sees and enters data for their own class —
+  // same restriction already correctly applied in Grades and
+  // Attendance. This was missing here entirely: any teacher could
+  // previously see (and enter mock results for) every other class.
   const jhs3 = students.filter(s=>s.class==="JHS 3"&&s.status==="active");
-  const examSort = useSort(examSchedule, "date");
-  const mockEnriched = mockExams.map(m=>({ ...m, studentName: students.find(x=>x.id===m.studentId)?.name||m.studentId, className: students.find(x=>x.id===m.studentId)?.class }));
+  const visibleExamSchedule = examSchedule.filter(e=>!isTeacher||e.class===myClass);
+  const examSort = useSort(visibleExamSchedule, "date");
+  const mockEnriched = mockExams
+    .map(m=>({ ...m, studentName: students.find(x=>x.id===m.studentId)?.name||m.studentId, className: students.find(x=>x.id===m.studentId)?.class }))
+    .filter(m=>!isTeacher||m.className===myClass);
   const mockSort = useSort(mockEnriched, "date", "desc");
+  const mockStudentOptions = students.filter(s=>s.status==="active"&&(!isTeacher||s.class===myClass));
 
   const saveSched=()=>{
     if(!sf.date||!sf.subject){ notify("Date and subject required","error"); return; }
-    setExamSchedule(p=>[...p,{id:uid("EXM"),...sf,createdBy:curUser.code}]);
+    const newSched = {id:uid("EXM"),...sf,createdBy:curUser.code};
+    setExamSchedule(p=>[...p,newSched]);
+    cloudSync?.writeThrough("exam_schedule", newSched);
     addAudit(`Exam scheduled: ${sf.subject} ${sf.class}`,"Exams"); notify("Exam added"); setShowSched(false); setSf(schedBlank);
   };
 
   const saveMock=()=>{
     if(!mf.studentId||mf.score===""){ notify("Student and score required","error"); return; }
-    setMockExams(p=>[...p,{id:uid("MCK"),...mf,score:+mf.score,enteredBy:curUser.code,date:todayStr()}]);
+    if(isTeacher && students.find(s=>s.id===mf.studentId)?.class!==myClass){ notify("You can only enter results for your own class","error"); return; }
+    const newMock = {id:uid("MCK"),...mf,score:+mf.score,enteredBy:curUser.code,date:todayStr()};
+    setMockExams(p=>[...p,newMock]);
+    cloudSync?.writeThrough("mock_exams", newMock);
     addAudit(`Mock result: ${mf.subject}`,"Exams"); notify("Mock result saved"); setShowMock(false); setMf(mockBlank);
   };
 
-  // BECE prediction based on mock averages
-  const beceRisk = jhs3.map(s=>{
+  // BECE prediction based on mock averages — a non-JHS-3 teacher has
+  // no reason to see JHS 3's data here, same reasoning as everywhere
+  // else in this fix.
+  const beceStudents = (isTeacher && myClass!=="JHS 3") ? [] : jhs3;
+  const beceRisk = beceStudents.map(s=>{
     const mocks = mockExams.filter(m=>m.studentId===s.id);
     if(!mocks.length) return { ...s, avg:null, risk:"No Data" };
     const avg = Math.round(mocks.reduce((a,m)=>a+m.score,0)/mocks.length);
@@ -1970,7 +2143,7 @@ function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,cu
           </div>
           {showMock&&(
             <Modal title="Enter Mock Result" onClose={()=>setShowMock(false)}>
-              <Row label="Student"><select value={mf.studentId} onChange={e=>setMf(p=>({...p,studentId:e.target.value}))} style={inp}><option value="">Select</option>{students.filter(s=>s.status==="active").map(s=><option key={s.id} value={s.id}>{s.name} — {s.class}</option>)}</select></Row>
+              <Row label="Student"><select value={mf.studentId} onChange={e=>setMf(p=>({...p,studentId:e.target.value}))} style={inp}><option value="">Select</option>{mockStudentOptions.map(s=><option key={s.id} value={s.id}>{s.name} — {s.class}</option>)}</select></Row>
               <Row label="Subject"><select value={mf.subject} onChange={e=>setMf(p=>({...p,subject:e.target.value}))} style={inp}>{getExamSubjects(subjects).map(s=><option key={s}>{s}</option>)}</select></Row>
               <Row label="Score (0–100)"><input type="number" min={0} max={100} value={mf.score} onChange={e=>setMf(p=>({...p,score:e.target.value}))} style={inp}/></Row>
               <Row label="Exam Type"><select value={mf.examType} onChange={e=>setMf(p=>({...p,examType:e.target.value}))} style={inp}><option>Mock 1</option><option>Mock 2</option><option>Mock 3</option><option>Pre-BECE</option></select></Row>
@@ -2031,7 +2204,7 @@ function Exams({ examSchedule,setExamSchedule,mockExams,setMockExams,students,cu
 }
 
 // ─── PROMOTION ───────────────────────────────────────────────
-function Promotion({ students,setStudents,grades,mockExams,attendance,fees,payroll,examSchedule,school,setSchool,curUser,notify,addAudit,yearArchive,setYearArchive }) {
+function Promotion({ students,setStudents,grades,mockExams,attendance,fees,payroll,examSchedule,school,setSchool,curUser,notify,addAudit,yearArchive,setYearArchive,cloudSync }) {
   const [passMark,setPassMark]=useState(50);
   const [evalYear,setEvalYear]=useState(school.currentYear);
   const [preview,setPreview]=useState(null); // array of { student, avg, hasData, defaultResult, override }
@@ -2100,22 +2273,28 @@ function Promotion({ students,setStudents,grades,mockExams,attendance,fees,payro
       };
     }).filter(t=>t.gradeCount>0 || t.feesCollected>0);
 
-    setYearArchive(prev=>({
-      ...prev,
-      [closingYear]: {
-        closedDate: nowStr(),
-        closedBy: curUser?.code,
-        studentsSnapshot: students.map(s=>({ id:s.id,name:s.name,class:s.class,status:s.status })),
-        termBreakdown,
-        totalStudents: activeStudents.length,
-        totalFeesCollected: yearFees.reduce((a,f)=>a+f.paid,0),
-        totalPayroll: yearPayroll.reduce((a,p)=>a+(p.netPay||0),0),
-        promotionSummary: counts,
-      }
-    }));
+    const yearSnapshot = {
+      closedDate: nowStr(),
+      closedBy: curUser?.code,
+      studentsSnapshot: students.map(s=>({ id:s.id,name:s.name,class:s.class,status:s.status })),
+      termBreakdown,
+      totalStudents: activeStudents.length,
+      totalFeesCollected: yearFees.reduce((a,f)=>a+f.paid,0),
+      totalPayroll: yearPayroll.reduce((a,p)=>a+(p.netPay||0),0),
+      promotionSummary: counts,
+    };
+    let newYearArchive;
+    setYearArchive(prev=>{ newYearArchive = { ...prev, [closingYear]: yearSnapshot }; return newYearArchive; });
+    // Year-end promotion is a significant, once-a-year event — same
+    // reasoning as the confirmRestore fix: an explicit push here,
+    // rather than relying solely on the passive debounced effect,
+    // removes any doubt this specific record actually reaches the
+    // cloud right when it matters most.
+    if (cloudSync?.enabled) cloudSync.pushYearArchiveToCloud(newYearArchive);
 
     let byClass = {}; // recompute nextClass for Promote rows honoring KG2 split order at execution time
     const classCounters = {};
+    let updatedStudentsList = [];
     setStudents(prevStudents=>{
       const map = new Map(prevStudents.map(s=>[s.id,{...s}]));
       preview.forEach(r=>{
@@ -2129,8 +2308,19 @@ function Promotion({ students,setStudents,grades,mockExams,attendance,fees,payro
         }
         // "Repeat" and "Review" leave the student's class unchanged
       });
-      return Array.from(map.values());
+      updatedStudentsList = Array.from(map.values());
+      return updatedStudentsList;
     });
+    // This changes potentially hundreds of students' class/status at
+    // once, bypassing every normal per-student save point — without
+    // an explicit bulk push here, none of it would ever reach the
+    // cloud, exactly like the restore-flow gap found and fixed
+    // earlier. Only the students actually touched by this run are
+    // pushed, not the whole roster.
+    if (cloudSync?.enabled) {
+      const touchedIds = new Set(preview.map(r=>r.student.id));
+      cloudSync.writeThroughBulk("students", updatedStudentsList.filter(s=>touchedIds.has(s.id)));
+    }
     const newYear = nextAcademicYear(school.currentYear);
     setSchool(prev=>({ ...prev, currentYear:newYear, currentTerm:"Term 1" }));
     addAudit(`Year-end promotion run: ${counts.Promote} promoted, ${counts.Graduate} graduated, ${counts.Repeat} repeated, ${counts.Review} flagged for review. New year: ${newYear}. Year ${closingYear} archived to History.`,"Promotion");
@@ -2494,7 +2684,9 @@ function Finance({ fees,setFees,expenses,setExpenses,students,setStudents,school
 
   const saveExp=()=>{
     if(!expForm.description||!expForm.amount){ notify("Description and amount required","error"); return; }
-    setExpenses(p=>[...p,{id:uid("EXP"),...expForm,amount:+expForm.amount,enteredBy:curUser.code}]);
+    const newExp = {id:uid("EXP"),...expForm,amount:+expForm.amount,enteredBy:curUser.code};
+    setExpenses(p=>[...p,newExp]);
+    cloudSync?.writeThrough("expenses", newExp);
     addAudit(`Expense: ${expForm.description} ${formatGHS(+expForm.amount)}`,"Finance"); notify("Expense recorded");
     setShowExp(false); setExpForm({description:"",amount:"",category:"Supplies",date:todayStr()});
   };
@@ -3033,7 +3225,17 @@ function Timetable({ timetables,setTimetables,curUser,cloudSync }) {
         <div style={{ display:"flex",gap:8,alignItems:"center" }}>
           {!isTeacher&&<select value={selClass} onChange={e=>setSelClass(e.target.value)} style={{ ...inp,width:160 }}>{Object.keys(timetables).map(c=><option key={c}>{c}</option>)}</select>}
           {isTeacher&&<div style={{ padding:"8px 14px",background:"#dbeafe",borderRadius:8,fontSize:13,color:"#1d4ed8",fontWeight:600 }}>📌 {selClass}</div>}
-          {!isTeacher&&<button onClick={()=>setEditMode(!editMode)} style={{ ...editMode?{...btnS}:btnP,padding:"8px 14px" }}>{editMode?"✅ Done Editing":"✏️ Edit Timetable"}</button>}
+          {!isTeacher&&<button onClick={()=>{
+            // Clicking Done Editing directly after typing a new
+            // subject — without pressing Enter first — used to
+            // silently discard that edit, since only Enter actually
+            // committed it to the timetable. Done Editing now commits
+            // whatever's currently open before exiting edit mode, so
+            // the natural "type it, then click Done" flow works.
+            if (editCell) saveCell();
+            if (editTimeRow !== null) saveTimeRow(editTimeRow);
+            setEditMode(!editMode);
+          }} style={{ ...editMode?{...btnS}:btnP,padding:"8px 14px" }}>{editMode?"✅ Done Editing":"✏️ Edit Timetable"}</button>}
         </div>
       </div>
       {tt?(
@@ -3047,7 +3249,7 @@ function Timetable({ timetables,setTimetables,curUser,cloudSync }) {
               {tt[0].periods.map((p,pi)=>(
                 <tr key={pi} style={{ borderBottom:"1px solid #f1f5f9" }}>
                   <td style={{ padding:"8px 12px",fontWeight:600,color:"#374151",background:"#f8fafc",whiteSpace:"nowrap",cursor:editMode?"pointer":"default" }}
-                    onClick={()=>{ if(editMode){ setEditTimeRow(pi); setEditTimeVal(p.time); } }}>
+                    onClick={()=>{ if(editMode){ if(editCell) saveCell(); setEditTimeRow(pi); setEditTimeVal(p.time); } }}>
                     {editTimeRow===pi ? (
                       <input value={editTimeVal} onChange={e=>setEditTimeVal(e.target.value)} placeholder="e.g. 7:30-8:30"
                         style={{ width:100,padding:"3px 6px",borderRadius:4,border:"1px solid #93c5fd",fontSize:11 }}
@@ -3061,7 +3263,7 @@ function Timetable({ timetables,setTimetables,curUser,cloudSync }) {
                     const isEditing=editMode&&editCell?.dayIdx===di&&editCell?.periodIdx===pi;
                     return (
                       <td key={di} style={{ padding:"6px 10px",textAlign:"center",background:isBreak?"#f1f5f9":dayColors[di%5],cursor:editMode&&!isBreak?"pointer":"default" }}
-                        onClick={()=>{ if(editMode&&!isBreak){ setEditCell({dayIdx:di,periodIdx:pi}); setEditVal(per.subject); }}}>
+                        onClick={()=>{ if(editMode&&!isBreak){ if(editTimeRow!==null) saveTimeRow(editTimeRow); if(editCell) saveCell(); setEditCell({dayIdx:di,periodIdx:pi}); setEditVal(per.subject); }}}>
                         {isEditing?(
                           <div onClick={e=>e.stopPropagation()}>
                             <input value={editVal} onChange={e=>setEditVal(e.target.value)} style={{ width:"90%",padding:"3px 6px",borderRadius:4,border:"1px solid #93c5fd",fontSize:11 }}
@@ -3111,7 +3313,14 @@ function Communication({ students,school,curUser,fees,attendance,classes,feeType
     return `${h12}:${String(m).padStart(2,"0")}${period}`;
   };
 
-  const activeStudents=students.filter(s=>s.status==="active");
+  const isTeacher = curUser?.role==="Teacher"; const myClass = isTeacher?curUser?.classAssigned:null;
+  // Every other teacher-accessible section (Grades, Attendance, Exams)
+  // restricts a teacher to their own class — Communication had no such
+  // restriction at all until now, meaning a teacher could message any
+  // class's parents, not just their own. Filtering the student pool
+  // once here cascades correctly to the single-student picker, class
+  // filters, and Bulk Send, without needing separate fixes in each.
+  const activeStudents=students.filter(s=>s.status==="active"&&(!isTeacher||s.class===myClass));
   const classStudents=selClass?activeStudents.filter(s=>s.class===selClass):activeStudents;
   const selStudent=students.find(s=>s.id===selStu);
 
@@ -3499,7 +3708,7 @@ ${school.principalName||"The Principal"}`,
               <Row label="Who">
                 <div style={{ display:"flex",gap:8 }}>
                   <button onClick={()=>{setBulkAudience("students");}} style={{ ...btnSm,flex:1,padding:"8px",background:bulkAudience==="students"?"#1e40af":"#f1f5f9",color:bulkAudience==="students"?"#fff":"#374151" }}>👨‍👩‍👧 Parents</button>
-                  <button onClick={()=>{setBulkAudience("staff");setBulkTemplateType("custom");}} style={{ ...btnSm,flex:1,padding:"8px",background:bulkAudience==="staff"?"#1e40af":"#f1f5f9",color:bulkAudience==="staff"?"#fff":"#374151" }}>🧑‍🏫 Staff</button>
+                  {!isTeacher&&<button onClick={()=>{setBulkAudience("staff");setBulkTemplateType("custom");}} style={{ ...btnSm,flex:1,padding:"8px",background:bulkAudience==="staff"?"#1e40af":"#f1f5f9",color:bulkAudience==="staff"?"#fff":"#374151" }}>🧑‍🏫 Staff</button>}
                 </div>
               </Row>
               <Row label="Send Via">
@@ -3722,9 +3931,11 @@ ${school.principalName||"The Principal"}`,
 }
 
 // ─── REPORTS ─────────────────────────────────────────────────
-function Reports({ students,grades,attendance,fees,expenses,school,classes,subjects,feeTypes }) {
+function Reports({ students,grades,attendance,fees,expenses,school,classes,subjects,feeTypes,curUser }) {
+  const isTeacher = curUser?.role==="Teacher"; const myClass = isTeacher?curUser?.classAssigned:null;
   const [rt,setRt]=useState("student");
-  const [sc,setSc]=useState(classes[5]); const [ss,setSs]=useState(""); const [st,setSt]=useState("Term 1");
+  const [sc,setSc]=useState(myClass||classes[5]); const [ss,setSs]=useState(""); const [st,setSt]=useState("Term 1");
+  const [bulkPrint,setBulkPrint]=useState(false);
 
   const classStu=students.filter(s=>s.status==="active"&&s.class===sc);
   const sg=(sid,term)=>grades.filter(g=>g.studentId===sid&&g.term===term);
@@ -3742,64 +3953,124 @@ function Reports({ students,grades,attendance,fees,expenses,school,classes,subje
         }
       `}</style>
       <h2 style={{ margin:"0 0 16px",fontSize:20,fontWeight:700,color:"#0f172a" }}>📋 Reports</h2>
-      <Tabs tabs={[{key:"student",label:"Student Report Card"},{key:"subject",label:"Subject Analysis"},{key:"school",label:"School Dashboard"}]} active={rt} onChange={setRt}/>
+      {!isTeacher && <Tabs tabs={[{key:"student",label:"Student Report Card"},{key:"subject",label:"Subject Analysis"},{key:"school",label:"School Dashboard"}]} active={rt} onChange={setRt}/>}
 
-      {rt==="student"&&(
-        <div>
-          <div style={{ display:"flex",gap:8,marginBottom:14,flexWrap:"wrap" }}>
-            <select value={sc} onChange={e=>{setSc(e.target.value);setSs("");}} style={{ ...inp,width:160 }}>{classes.map(c=><option key={c}>{c}</option>)}</select>
-            <select value={ss} onChange={e=>setSs(e.target.value)} style={{ ...inp,width:220 }}><option value="">Select student</option>{classStu.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select>
-            <select value={st} onChange={e=>setSt(e.target.value)} style={{ ...inp,width:120 }}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
-          </div>
-          {ss&&(()=>{
-            const stu=students.find(s=>s.id===ss); const sGrades=sg(ss,st); const av=avg(sGrades); const att=attRate(ss);
-            return (
-              <Card className="report-card-print" style={{ padding:28 }}>
-                <div style={{ textAlign:"center",marginBottom:16,borderBottom:"2px solid #1e40af",paddingBottom:14 }}>
-                  {school.logo && <img src={school.logo} alt="" style={{ width:56,height:56,objectFit:"contain",marginBottom:6 }}/>}
-                  <div style={{ fontSize:20,fontWeight:700,color:"#0f172a" }}>{school.name}</div>
-                  <div style={{ fontSize:12,color:"#64748b" }}>{school.address} | {school.phone}</div>
-                  <div style={{ fontSize:15,fontWeight:700,color:"#1e40af",marginTop:8 }}>ACADEMIC REPORT — {st} 2024/2025</div>
+      {rt==="student"&&(()=>{
+        // Extracted so the exact same report card layout can be used
+        // both for a single selected student and for printing every
+        // student in the class in one batch — one definition of what
+        // a report card looks like, used both ways.
+        const renderCardBody = (stu) => {
+          const sGrades=sg(stu.id,st); const av=avg(sGrades); const att=attRate(stu.id);
+          const classAverages = classStu.map(s=>({ id:s.id, avg:avg(sg(s.id,st)) })).filter(s=>s.avg>0);
+          const studentAvg = classAverages.find(s=>s.id===stu.id)?.avg;
+          const position = studentAvg!=null ? classAverages.filter(s=>s.avg>studentAvg).length+1 : null;
+          const totalRanked = classAverages.length;
+          return (
+            <>
+              <div style={{ textAlign:"center",marginBottom:16,borderBottom:"2px solid #1e40af",paddingBottom:14 }}>
+                {school.logo && <img src={school.logo} alt="" style={{ width:56,height:56,objectFit:"contain",marginBottom:6 }}/>}
+                <div style={{ fontSize:20,fontWeight:700,color:"#0f172a" }}>{school.name}</div>
+                <div style={{ fontSize:12,color:"#64748b" }}>{school.address} | {school.phone}</div>
+                <div style={{ fontSize:15,fontWeight:700,color:"#1e40af",marginTop:8 }}>ACADEMIC REPORT — {st} 2024/2025</div>
+              </div>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16,fontSize:13 }}>
+                <div><strong>Name:</strong> {stu?.name}</div><div><strong>Class:</strong> {stu?.class}</div>
+                <div><strong>Student ID:</strong> {stu?.id}</div>
+                <div><strong>Attendance:</strong> <span style={{ color:att>=80?"#16a34a":"#dc2626",fontWeight:700 }}>{att}%</span></div>
+                <div><strong>Class Position:</strong> {position!=null?`${position} of ${totalRanked}`:"Not yet ranked"}</div>
+              </div>
+              <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:16 }}>
+                <thead><tr style={{ background:"#1e40af" }}>
+                  {["Subject","CA (30)","Exam (70)","Total (100)","Grade","Remark"].map(h=><th key={h} style={{ padding:"8px 12px",textAlign:"left",fontWeight:600,color:"#fff" }}>{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {sGrades.length>0?sGrades.map(g=>(
+                    <tr key={g.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                      <td style={{ padding:"7px 12px" }}>{g.subject}</td>
+                      <td style={{ padding:"7px 12px" }}>{g.ca??"-"}</td>
+                      <td style={{ padding:"7px 12px" }}>{g.exam??"-"}</td>
+                      <td style={{ padding:"7px 12px",fontWeight:700 }}>{g.score}</td>
+                      <td style={{ padding:"7px 12px" }}><span style={{ fontWeight:700,color:gradeColor(g.grade) }}>{g.grade}</span></td>
+                      <td style={{ padding:"7px 12px",color:"#64748b",fontSize:11 }}>{g.score>=80?"Excellent":g.score>=70?"Very Good":g.score>=60?"Good":g.score>=50?"Average":"Needs Improvement"}</td>
+                    </tr>
+                  )):<tr><td colSpan={6} style={{ padding:20,textAlign:"center",color:"#9ca3af" }}>No grades for {st}</td></tr>}
+                </tbody>
+              </table>
+              {sGrades.length>0&&(
+                <div style={{ display:"flex",gap:16,padding:12,background:"#f0f9ff",borderRadius:8,marginBottom:16 }}>
+                  <div><span style={{ fontSize:12,color:"#0369a1" }}>Average: </span><strong>{av}%</strong></div>
+                  <div><span style={{ fontSize:12,color:"#0369a1" }}>Overall: </span><strong style={{ color:gradeColor(calcGrade(av)) }}>{calcGrade(av)}</strong></div>
+                  <div><span style={{ fontSize:12,color:"#0369a1" }}>Subjects: </span><strong>{sGrades.length}</strong></div>
                 </div>
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16,fontSize:13 }}>
-                  <div><strong>Name:</strong> {stu?.name}</div><div><strong>Class:</strong> {stu?.class}</div>
-                  <div><strong>Student ID:</strong> {stu?.id}</div>
-                  <div><strong>Attendance:</strong> <span style={{ color:att>=80?"#16a34a":"#dc2626",fontWeight:700 }}>{att}%</span></div>
-                </div>
-                <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:16 }}>
-                  <thead><tr style={{ background:"#1e40af" }}>
-                    {["Subject","CA (30)","Exam (70)","Total (100)","Grade","Remark"].map(h=><th key={h} style={{ padding:"8px 12px",textAlign:"left",fontWeight:600,color:"#fff" }}>{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {sGrades.length>0?sGrades.map(g=>(
-                      <tr key={g.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
-                        <td style={{ padding:"7px 12px" }}>{g.subject}</td>
-                        <td style={{ padding:"7px 12px" }}>{g.ca??"-"}</td>
-                        <td style={{ padding:"7px 12px" }}>{g.exam??"-"}</td>
-                        <td style={{ padding:"7px 12px",fontWeight:700 }}>{g.score}</td>
-                        <td style={{ padding:"7px 12px" }}><span style={{ fontWeight:700,color:gradeColor(g.grade) }}>{g.grade}</span></td>
-                        <td style={{ padding:"7px 12px",color:"#64748b",fontSize:11 }}>{g.score>=80?"Excellent":g.score>=70?"Very Good":g.score>=60?"Good":g.score>=50?"Average":"Needs Improvement"}</td>
-                      </tr>
-                    )):<tr><td colSpan={6} style={{ padding:20,textAlign:"center",color:"#9ca3af" }}>No grades for {st}</td></tr>}
-                  </tbody>
-                </table>
-                {sGrades.length>0&&(
-                  <div style={{ display:"flex",gap:16,padding:12,background:"#f0f9ff",borderRadius:8,marginBottom:16 }}>
-                    <div><span style={{ fontSize:12,color:"#0369a1" }}>Average: </span><strong>{av}%</strong></div>
-                    <div><span style={{ fontSize:12,color:"#0369a1" }}>Overall: </span><strong style={{ color:gradeColor(calcGrade(av)) }}>{calcGrade(av)}</strong></div>
-                    <div><span style={{ fontSize:12,color:"#0369a1" }}>Subjects: </span><strong>{sGrades.length}</strong></div>
-                  </div>
-                )}
+              )}
+              <div style={{ display:"flex",gap:8 }}>
+                <div style={{ flex:1,borderTop:"1px solid #e5e7eb",paddingTop:8,fontSize:12,color:"#64748b" }}>Class Teacher's Remarks: _______________</div>
+                <div style={{ flex:1,borderTop:"1px solid #e5e7eb",paddingTop:8,fontSize:12,color:"#64748b" }}>Head's Signature: _______________</div>
+              </div>
+            </>
+          );
+        };
+
+        return (<>
+          {bulkPrint ? (
+            <div>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+                <p style={{ fontSize:13,color:"#64748b",margin:0 }}>{classStu.length} report card(s) for {sc} — {st}. Each prints on its own page.</p>
                 <div style={{ display:"flex",gap:8 }}>
-                  <div style={{ flex:1,borderTop:"1px solid #e5e7eb",paddingTop:8,fontSize:12,color:"#64748b" }}>Class Teacher's Remarks: _______________</div>
-                  <div style={{ flex:1,borderTop:"1px solid #e5e7eb",paddingTop:8,fontSize:12,color:"#64748b" }}>Head's Signature: _______________</div>
+                  <button onClick={()=>setBulkPrint(false)} style={{ ...btnS }}>← Back to Single</button>
+                  <button onClick={()=>{
+                    const prevTitle = document.title;
+                    document.title = `${school.name} — ${sc} Report Cards`;
+                    window.print();
+                    setTimeout(()=>{ document.title = prevTitle; }, 500);
+                  }} style={{ ...btnP }}>🖨️ Print All {classStu.length}</button>
                 </div>
-                <button onClick={()=>window.print()} style={{ ...btnP,marginTop:16 }}>🖨️ Print Report Card</button>
-              </Card>
-            );
-          })()}
-        </div>
-      )}
+              </div>
+              {classStu.map((stu,idx)=>(
+                <Card key={stu.id} className="report-card-print" style={{ padding:28,marginBottom:16,pageBreakAfter:idx<classStu.length-1?"always":"auto" }}>
+                  {renderCardBody(stu)}
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <div>
+              <div style={{ display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",justifyContent:"space-between" }}>
+                <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+                  {isTeacher
+                    ? <div style={{ padding:"8px 14px",background:"#dbeafe",borderRadius:8,fontSize:13,color:"#1d4ed8",fontWeight:600 }}>📌 {sc}</div>
+                    : <select value={sc} onChange={e=>{setSc(e.target.value);setSs("");}} style={{ ...inp,width:160 }}>{classes.map(c=><option key={c}>{c}</option>)}</select>}
+                  <select value={ss} onChange={e=>setSs(e.target.value)} style={{ ...inp,width:220 }}><option value="">Select student</option>{classStu.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select>
+                  <select value={st} onChange={e=>setSt(e.target.value)} style={{ ...inp,width:120 }}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
+                </div>
+                {classStu.length>0 && <button onClick={()=>setBulkPrint(true)} style={{ ...btnS,whiteSpace:"nowrap" }}>🖨️ Print All {classStu.length} in {sc}</button>}
+              </div>
+              {classStu.length===0 && (
+                <div style={{ padding:24,textAlign:"center",color:"#9ca3af",background:"#f8fafc",borderRadius:10 }}>
+                  No active students found in <strong>{sc}</strong>. Check Students to confirm students are assigned to this class.
+                </div>
+              )}
+              {ss&&(()=>{
+                const stu=students.find(s=>s.id===ss);
+                return (
+                  <Card className="report-card-print" style={{ padding:28 }}>
+                    {renderCardBody(stu)}
+                    <button onClick={()=>{
+                      const prevTitle = document.title;
+                      document.title = `${school.name} — ${stu?.name} Report Card`;
+                      window.print();
+                      setTimeout(()=>{ document.title = prevTitle; }, 500);
+                    }} style={{ ...btnP,marginTop:16 }}>🖨️ Print Report Card</button>
+                    <p style={{ fontSize:11,color:"#94a3b8",marginTop:8 }}>
+                      For a fully clean printout with no browser header or footer at all, look for "More settings" in the print dialog and turn off "Headers and footers" — this is a browser setting, not something the app can turn off automatically.
+                    </p>
+                  </Card>
+                );
+              })()}
+            </div>
+          )}
+        </>);
+      })()}
 
       {rt==="subject"&&(
         <div>
@@ -3999,7 +4270,7 @@ function IDCard({ person,type,school,roleColors }) {
 }
 
 // ─── ARCHIVE ─────────────────────────────────────────────────
-function Archive({ students,setStudents,users,setUsers,notify,addAudit }) {
+function Archive({ students,setStudents,users,setUsers,notify,addAudit,cloudSync }) {
   const [tab,setTab]=useState("dropouts");
   const dropped=students.filter(s=>s.status==="dropout");
   const graduated=students.filter(s=>s.status==="graduated");
@@ -4008,8 +4279,18 @@ function Archive({ students,setStudents,users,setUsers,notify,addAudit }) {
   const graduatedSort = useSort(graduated, "name");
   const inactiveSort = useSort(inactive, "name");
 
-  const restore=id=>{ setStudents(p=>p.map(s=>s.id===id?{...s,status:"active"}:s)); addAudit(`Restored: ${id}`,"Archive"); notify("Restored to active"); };
-  const graduate=id=>{ setStudents(p=>p.map(s=>s.id===id?{...s,status:"graduated"}:s)); addAudit(`Graduated: ${id}`,"Archive"); notify("Marked as graduated"); };
+  const restore=id=>{
+    const updated = {...students.find(s=>s.id===id), status:"active"};
+    setStudents(p=>p.map(s=>s.id===id?updated:s));
+    cloudSync?.writeThrough("students", updated);
+    addAudit(`Restored: ${id}`,"Archive"); notify("Restored to active");
+  };
+  const graduate=id=>{
+    const updated = {...students.find(s=>s.id===id), status:"graduated"};
+    setStudents(p=>p.map(s=>s.id===id?updated:s));
+    cloudSync?.writeThrough("students", updated);
+    addAudit(`Graduated: ${id}`,"Archive"); notify("Marked as graduated");
+  };
 
   const cols=["ID","Name","Class","Guardian","Phone","Status","Actions"];
   const colKeys=[null,"name","class","guardian","phone","status",null];
@@ -4083,6 +4364,34 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
   cloudSync, setLicInfo, setLicenced, buildBackupPayload }) {
   const [form,setForm]=useState({...school}); const [tab,setTab]=useState("school");
   const [resetId,setResetId]=useState(""); const [newPin,setNewPin]=useState("");
+
+  // Pulls the latest classes/subjects when this tab is opened —
+  // same on-open pattern already proven for Timetable, so a change
+  // made on another device shows up here without needing a full
+  // device rejoin to see it.
+  useEffect(() => {
+    if (tab!=="classes" || !cloudSync?.enabled) return;
+    cloudSync.fetchClassesConfigFromCloud().then(cfg => {
+      if (!cfg) return;
+      if (cfg.classes) setClasses(cfg.classes);
+      if (cfg.classLevels) setClassLevels(cfg.classLevels);
+      if (cfg.subjects) setSubjects(cfg.subjects);
+    });
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Same refresh-on-open behavior for School Profile — this was
+  // missing before, which meant a change made directly in Supabase,
+  // or on another device, stayed invisible on this screen until a
+  // fresh join or an explicit Sync Now happened to trigger a pull.
+  useEffect(() => {
+    if (tab!=="school" || !cloudSync?.enabled) return;
+    cloudSync.fetchSchoolProfileFromCloud().then(fields => {
+      if (!fields) return;
+      setSchool(prev => ({ ...prev, ...fields }));
+      setForm(prev => ({ ...prev, ...fields }));
+    });
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [importFile,setImportFile]=useState(null); const [importErr,setImportErr]=useState("");
   const fileInputRef = useRef(null);
   const [newClassName,setNewClassName]=useState(""); const [newClassLevel,setNewClassLevel]=useState("Primary");
@@ -4397,7 +4706,21 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
       cloudSync.writeThroughBulk("payroll", d.payroll||[]);
       cloudSync.writeThroughBulk("books", d.books||[]);
       cloudSync.writeThroughBulk("borrows", d.borrows||[]);
+      cloudSync.writeThroughBulk("mock_exams", d.mockExams||[]);
+      cloudSync.writeThroughBulk("expenses", d.expenses||[]);
+      cloudSync.writeThroughBulk("exam_schedule", d.examSchedule||[]);
+      cloudSync.writeThroughBulk("nursery_logs", d.nurseryLogs||[]);
+      cloudSync.writeThroughBulk("milestones", d.milestones||[]);
       cloudSync.pushTimetablesToCloud(d.timetables||{});
+      // These were previously left to the passive debounced effect
+      // (which watches the relevant state and pushes ~1s after a
+      // change) — during a bulk restore that fires a dozen state
+      // updates in the same tick, relying on that alone wasn't
+      // reliable enough. Explicit push here, same as Timetables
+      // already correctly does, removes any doubt.
+      if (d.school) cloudSync.pushSchoolProfileToCloud(d.school);
+      cloudSync.pushClassesConfigToCloud({ classes: d.classes||classes, classLevels: d.classLevels||classLevels, subjects: d.subjects||subjects });
+      if (d.yearArchive) cloudSync.pushYearArchiveToCloud(d.yearArchive);
       notify("Backup restored ✅ — syncing to the cloud in the background");
     } else {
       notify("Backup restored ✅");
@@ -4799,7 +5122,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
           <div style={{ textAlign:"center",marginBottom:20 }}>
             <div style={{ fontSize:40 }}>🏫</div>
             <h2 style={{ margin:"8px 0 2px",fontSize:20 }}>EduSmart School Manager</h2>
-            <p style={{ margin:0,color:"#64748b",fontSize:13 }}>Version 6.0.2</p>
+            <p style={{ margin:0,color:"#64748b",fontSize:13 }}>Version {APP_VERSION}</p>
           </div>
           <p style={{ fontSize:13,lineHeight:1.7,color:"#374151" }}>
             EduSmart is an all-in-one school management system built for Ghanaian private basic schools —
@@ -4823,7 +5146,7 @@ function Settings({ school,setSchool,users,setUsers,notify,addAudit,licInfo,
       {tab==="terms"&&(
         <Card style={{ padding:24,maxWidth:700 }}>
           <h3 style={{ margin:"0 0 4px",fontSize:16 }}>Terms of Use</h3>
-          <p style={{ fontSize:11,color:"#94a3b8",marginBottom:18 }}>Last updated: August 2026 · EduSmart School Manager, v6.0.2</p>
+          <p style={{ fontSize:11,color:"#94a3b8",marginBottom:18 }}>Last updated: August 2026 · EduSmart School Manager, v{APP_VERSION}</p>
           <div style={{ fontSize:13,lineHeight:1.8,color:"#374151" }}>
 
             <h4 style={{ fontSize:13,margin:"16px 0 6px" }}>1. Acceptance</h4>

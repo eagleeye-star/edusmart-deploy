@@ -22,7 +22,7 @@ import {
 } from "./cloudSyncSetup.js";
 import { generateConnectCode, parseConnectCode } from "./connectCode.js";
 
-const SYNCED_TABLES = ["students", "attendance", "grades", "fees", "staff", "fee_types", "payroll", "books", "borrows"];
+const SYNCED_TABLES = ["students", "attendance", "grades", "fees", "staff", "fee_types", "payroll", "books", "borrows", "mock_exams", "expenses", "exam_schedule", "nursery_logs", "milestones"];
 const FLUSH_INTERVAL_MS = 8000;
 const JOIN_TIMEOUT_MS = 20000;
 
@@ -209,12 +209,19 @@ export function useCloudSync({ appState, appSetters }) {
     );
     try {
       const schoolInfo = await remoteRef.current.fetchSchoolInfo();
-      const { timetablesJson, ...schoolFields } = schoolInfo;
+      const { timetablesJson, classesConfigJson, yearArchiveJson, ...schoolFields } = schoolInfo;
       appSetters.school(prev => ({ ...prev, ...schoolFields }));
-      // timetables lives in its own top-level app state, not nested
-      // inside school — routing it there directly avoids it silently
-      // landing somewhere the Timetable UI never actually reads from.
+      // timetables and classes/subjects live in their own top-level
+      // app state, not nested inside school — routing them there
+      // directly avoids them silently landing somewhere the relevant
+      // UI never actually reads from.
       if (timetablesJson && appSetters.timetables) appSetters.timetables(timetablesJson);
+      if (classesConfigJson && appSetters.classes) {
+        if (classesConfigJson.classes) appSetters.classes(classesConfigJson.classes);
+        if (classesConfigJson.classLevels && appSetters.classLevels) appSetters.classLevels(classesConfigJson.classLevels);
+        if (classesConfigJson.subjects && appSetters.subjects) appSetters.subjects(classesConfigJson.subjects);
+      }
+      if (yearArchiveJson && appSetters.yearArchive) appSetters.yearArchive(yearArchiveJson);
     } catch (e) { /* non-fatal — school name etc. can be filled in later */ }
     // Populate local state directly (not via mergeIntoAppState's
     // client_id-matching logic, since there's no existing local data
@@ -228,6 +235,11 @@ export function useCloudSync({ appState, appSetters }) {
     if (pulled.payroll?.length) appSetters.payroll(pulled.payroll.map(s => ({ ...s, id: s.client_id })));
     if (pulled.books?.length) appSetters.books(pulled.books.map(s => ({ ...s, id: s.client_id })));
     if (pulled.borrows?.length) appSetters.borrows(pulled.borrows.map(s => ({ ...s, id: s.client_id })));
+    if (pulled.mock_exams?.length) appSetters.mock_exams(pulled.mock_exams.map(s => ({ ...s, id: s.client_id })));
+    if (pulled.expenses?.length) appSetters.expenses(pulled.expenses.map(s => ({ ...s, id: s.client_id })));
+    if (pulled.exam_schedule?.length) appSetters.exam_schedule(pulled.exam_schedule.map(s => ({ ...s, id: s.client_id })));
+    if (pulled.nursery_logs?.length) appSetters.nursery_logs(pulled.nursery_logs.map(s => ({ ...s, id: s.client_id })));
+    if (pulled.milestones?.length) appSetters.milestones(pulled.milestones.map(s => ({ ...s, id: s.client_id })));
     skipNextInitialPull.current = true;
     setEnabled(true);
     return pulled;
@@ -295,6 +307,27 @@ export function useCloudSync({ appState, appSetters }) {
     setStatus(s => ({ ...s, phase: "connecting" }));
     const reachable = await engineRef.current.isReachable();
     const result = reachable ? await engineRef.current.flush() : { pushed: 0, remaining: engineRef.current.pendingCount(), offline: true };
+    // "Sync Now" previously only flushed the per-record queue
+    // (students/attendance/grades/etc.) — school profile, classes,
+    // and timetables live outside that queue entirely (see the JSON-
+    // blob sync design), so a stale copy of any of those would never
+    // get refreshed by this button even though it looked like a full
+    // sync. Pulling them here makes this a genuine "refresh
+    // everything" action, matching what pressing it actually implies.
+    if (reachable) {
+      try {
+        const schoolInfo = await remoteRef.current.fetchSchoolInfo();
+        const { timetablesJson, classesConfigJson, yearArchiveJson, ...schoolFields } = schoolInfo;
+        if (appSetters.school) appSetters.school(prev => ({ ...prev, ...schoolFields }));
+        if (timetablesJson && appSetters.timetables) appSetters.timetables(timetablesJson);
+        if (classesConfigJson) {
+          if (classesConfigJson.classes && appSetters.classes) appSetters.classes(classesConfigJson.classes);
+          if (classesConfigJson.classLevels && appSetters.classLevels) appSetters.classLevels(classesConfigJson.classLevels);
+          if (classesConfigJson.subjects && appSetters.subjects) appSetters.subjects(classesConfigJson.subjects);
+        }
+        if (yearArchiveJson && appSetters.yearArchive) appSetters.yearArchive(yearArchiveJson);
+      } catch (e) { /* non-fatal — the per-record sync above already ran either way */ }
+    }
     setStatus({
       phase: reachable ? "online" : "offline",
       pending: engineRef.current.pendingCount(),
@@ -336,11 +369,58 @@ export function useCloudSync({ appState, appSetters }) {
   // and safer than building full realtime sync for something that
   // doesn't need that responsiveness.
   const pushTimetablesToCloud = useCallback(async (timetablesObj) => {
-    if (!enabled) return;
+    if (!enabled) return { success: true };
     const link = getDeviceLink(window.localStorage);
-    if (!link) return;
-    try { await remoteRef.current.updateSchoolInfo(link.schoolId, { timetablesJson: timetablesObj }); }
-    catch (e) { /* non-fatal — local copy is still correct either way */ }
+    if (!link) return { success: true };
+    try { await remoteRef.current.updateSchoolInfo(link.schoolId, { timetablesJson: timetablesObj }); return { success: true }; }
+    catch (e) {
+      // This used to fail completely silently — found during a real
+      // investigation that a silent failure here is indistinguishable
+      // from "nothing to push," which made a genuine sync problem
+      // impossible to tell apart from normal behavior. Now the caller
+      // gets the real error and can actually surface it.
+      return { success: false, error: e?.message || "Couldn't sync timetables" };
+    }
+  }, [enabled]);
+
+  // Classes & Subjects — same gap this same fix already closed for
+  // Timetables and the general School Profile: this had NO sync
+  // mechanism at all until now. Same pattern: push on change, pull on
+  // join (see the app-level join flow).
+  const pushClassesConfigToCloud = useCallback(async (classesConfigObj) => {
+    if (!enabled) return { success: true };
+    const link = getDeviceLink(window.localStorage);
+    if (!link) return { success: true };
+    try { await remoteRef.current.updateSchoolInfo(link.schoolId, { classesConfigJson: classesConfigObj }); return { success: true }; }
+    catch (e) { return { success: false, error: e?.message || "Couldn't sync classes & subjects" }; }
+  }, [enabled]);
+
+  const fetchClassesConfigFromCloud = useCallback(async () => {
+    if (!enabled) return null;
+    try {
+      const info = await remoteRef.current.fetchSchoolInfo();
+      return info.classesConfigJson || null;
+    } catch (e) { return null; }
+  }, [enabled]);
+
+  // Year Archive — written once per year by Promotion, read rarely
+  // (checking a past year's summary). Same JSON-blob pattern as
+  // Timetables and Classes & Subjects: push on change, pull on join
+  // or on-demand from wherever the archive is viewed.
+  const pushYearArchiveToCloud = useCallback(async (yearArchiveObj) => {
+    if (!enabled) return { success: true };
+    const link = getDeviceLink(window.localStorage);
+    if (!link) return { success: true };
+    try { await remoteRef.current.updateSchoolInfo(link.schoolId, { yearArchiveJson: yearArchiveObj }); return { success: true }; }
+    catch (e) { return { success: false, error: e?.message || "Couldn't sync year archive" }; }
+  }, [enabled]);
+
+  const fetchYearArchiveFromCloud = useCallback(async () => {
+    if (!enabled) return null;
+    try {
+      const info = await remoteRef.current.fetchSchoolInfo();
+      return info.yearArchiveJson || null;
+    } catch (e) { return null; }
   }, [enabled]);
 
   // Pushes the general school profile (name, address, logo, term
@@ -350,11 +430,26 @@ export function useCloudSync({ appState, appSetters }) {
   // devices. Fixed to work the same way Timetables already does:
   // debounced push on change, from the app-level effect that calls this.
   const pushSchoolProfileToCloud = useCallback(async (schoolObj) => {
-    if (!enabled) return;
+    if (!enabled) return { success: true };
     const link = getDeviceLink(window.localStorage);
-    if (!link) return;
-    try { await remoteRef.current.updateSchoolInfo(link.schoolId, schoolObj); }
-    catch (e) { /* non-fatal — will retry on the next change */ }
+    if (!link) return { success: true };
+    try { await remoteRef.current.updateSchoolInfo(link.schoolId, schoolObj); return { success: true }; }
+    catch (e) { return { success: false, error: e?.message || "Couldn't sync school profile" }; }
+  }, [enabled]);
+
+  // Previously School Profile only ever refreshed at join time or via
+  // Sync Now — unlike Classes & Subjects and Timetable, opening the
+  // Settings → School Profile tab itself did nothing. A change made
+  // directly in Supabase, or on another device, would sit invisible
+  // until one of those other triggers happened to fire. Same on-open
+  // pattern as the other two now.
+  const fetchSchoolProfileFromCloud = useCallback(async () => {
+    if (!enabled) return null;
+    try {
+      const info = await remoteRef.current.fetchSchoolInfo();
+      const { timetablesJson, classesConfigJson, yearArchiveJson, ...schoolFields } = info;
+      return schoolFields;
+    } catch (e) { return null; }
   }, [enabled]);
 
   const fetchTimetablesFromCloud = useCallback(async () => {
@@ -403,7 +498,9 @@ export function useCloudSync({ appState, appSetters }) {
     pushLicenceToCloud, checkForLicenceUpdate,
     getConnectCode, disable, syncNow,
     saveSmsCredentials, getSmsStatus, sendBulkSms, setSmsBalance, fetchSmsLog,
-    pushTimetablesToCloud, fetchTimetablesFromCloud, pushSchoolProfileToCloud,
+    pushTimetablesToCloud, fetchTimetablesFromCloud, pushSchoolProfileToCloud, fetchSchoolProfileFromCloud,
+    pushClassesConfigToCloud, fetchClassesConfigFromCloud,
+    pushYearArchiveToCloud, fetchYearArchiveFromCloud,
     getBackupSettings, saveBackupSettings, runAutomaticBackup, listCloudBackups, downloadCloudBackup,
   };
 }
